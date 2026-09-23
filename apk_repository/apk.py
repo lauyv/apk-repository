@@ -33,7 +33,11 @@ def validate_package(apk, path, package, version, arch, signed_keys=None):
     for field, expected in (("name", package["name"]), ("version", version), ("arch", arch), ("license", package["license"])):
         require(info.get(field) == expected, f"unexpected {field} in {path}")
     expected_depends = package["dependencies"] + ["!" + name for name in package["conflicts"]]
-    require(sorted(info.get("depends", [])) == sorted(expected_depends), "package dependency mismatch: " + package["name"])
+    actual_depends = sorted(info.get("depends", []))
+    expected_depends = sorted(expected_depends)
+    require(actual_depends == expected_depends,
+            f"package dependency mismatch: {package['name']}; "
+            f"expected={expected_depends!r}; actual={actual_depends!r}")
     require(not info.get("install-if") and not info.get("replaces") and not info.get("provides"), "unexpected package replacement or auto-install metadata")
     for directory in document.get("paths", []):
         name = directory.get("name", "")

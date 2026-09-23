@@ -9,7 +9,7 @@
   "license_reviewed": true,
   "prerelease_fallback": true,
   "revision": 1,
-  "dependencies": ["luci-base", "sing-box", "rpcd", "jshn", "jsonfilter"],
+  "dependencies": ["luci-base", "sing-box", "rpcd", "jshn", "jsonfilter", "uclient-fetch"],
   "conflicts": [],
   "architectures": {
     "x86_64": {
