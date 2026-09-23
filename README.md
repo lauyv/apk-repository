@@ -25,7 +25,7 @@
 
 可选择下方 LuCI 页面方案或命令行方案，使用其中一种即可。
 
-先通过 `apk --print-arch` 确认设备的包架构，按下表选择订阅地址。其他 ARM64 架构不能仅凭 CPU 为 ARM64 就使用 `aarch64_generic` 源。
+先通过 `cat /etc/apk/arch` 确认设备实际配置的包架构，按下表选择订阅地址。`apk --print-arch` 输出编译时默认架构，不用于选择 OpenWrt 软件源。其他 ARM64 架构不能仅凭 CPU 为 ARM64 就使用 `aarch64_generic` 源。
 
 | 架构 | 稳定源 |
 |---|---|
@@ -90,7 +90,7 @@ sha256sum /tmp/apk-repository.pem
 ```sh
 (
   set -eu
-  arch=$(apk --print-arch)
+  arch=$(cat /etc/apk/arch)
   case "$arch" in
     x86_64|aarch64_generic) ;;
     *) echo "Unsupported architecture: $arch" >&2; exit 1 ;;

@@ -6,15 +6,33 @@ runs:
     - uses: astral-sh/setup-uv@v10.2.0
       with:
         version: "0.12.18"
-        enable-cache: false
+        enable-cache: true
+        cache-dependency-glob: |
+          uv.lock
+          .python-version
+        prune-cache: false
     - name: Install Python project
       shell: bash
       run: uv sync --locked
-    - name: Install APK Tools build dependencies
+    - name: Restore APK Tools
+      id: apk-cache
+      uses: actions/cache@v6.1.0
+      with:
+        path: ${{ env.TOOLS_DIR }}/apk
+        key: apk-tools-v1-${{ runner.os }}-${{ runner.arch }}-${{ env.ImageOS }}-${{ env.ImageVersion }}-${{ hashFiles('repository.json', 'scripts/prepare-tools.sh', '.github/actions/setup-toolchain/action.yml') }}
+    - name: Install APK Tools runtime dependencies
       shell: bash
       run: |
         sudo apt-get update -qq
-        sudo apt-get install -y --no-install-recommends build-essential meson ninja-build pkg-config libssl-dev zlib1g-dev libzstd-dev fakeroot wget curl
+        sudo apt-get install -y --no-install-recommends libssl3t64 zlib1g libzstd1 fakeroot wget curl
+    - name: Install APK Tools build dependencies
+      if: steps.apk-cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: sudo apt-get install -y --no-install-recommends build-essential meson ninja-build pkg-config libssl-dev zlib1g-dev libzstd-dev
     - name: Compile pinned APK Tools
+      if: steps.apk-cache.outputs.cache-hit != 'true'
       shell: bash
       run: bash scripts/prepare-tools.sh
+    - name: Check APK Tools version
+      shell: bash
+      run: uv run --locked python -c 'import os; from apk_repository.apk import check_tool; from apk_repository.config import load; check_tool(os.environ["TOOLS_DIR"] + "/apk", load(".")[0]["apk_tools"]["version"])'

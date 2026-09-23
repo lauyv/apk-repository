@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Runs only on the Linux CI runner. No production signing key is available here.
-set -euo pipefail
+set -Eeuo pipefail
+trap 'status=$?; echo "OpenWrt check failed at line $LINENO (exit $status)" >&2; exit "$status"' ERR
 
 SITE=$(cd "${1:?Pass the signed site directory}" && pwd)
 ARCH=${2:?Pass the OpenWrt package architecture}
@@ -26,11 +27,19 @@ cleanup() {
 trap cleanup EXIT
 
 # Fixed baselines from the official OpenWrt 25.12.0 download manifests.
-curl --fail --location --silent --show-error --retry 3 \
-  "https://downloads.openwrt.org/releases/25.12.0/targets/$target/$image_file" \
-  -o "$WORK/rootfs.tar.gz"
-printf '%s  %s\n' "$image_sha256" "$WORK/rootfs.tar.gz" | sha256sum -c -
-docker import "$WORK/rootfs.tar.gz" apk-repository-openwrt:check
+cache_dir="build/cache/openwrt/$ARCH"
+mkdir -p "$cache_dir"
+rootfs="$cache_dir/$image_sha256.tar.gz"
+if [[ ! -f "$rootfs" ]]; then
+  curl --fail --location --silent --show-error --retry 3 \
+    "https://downloads.openwrt.org/releases/25.12.0/targets/$target/$image_file" \
+    -o "$WORK/rootfs.tar.gz"
+  printf '%s  %s\n' "$image_sha256" "$WORK/rootfs.tar.gz" | sha256sum -c -
+  mv "$WORK/rootfs.tar.gz" "$rootfs"
+fi
+# Check restored cache contents too, before Docker imports the filesystem.
+printf '%s  %s\n' "$image_sha256" "$rootfs" | sha256sum -c -
+docker import "$rootfs" apk-repository-openwrt:check
 
 uv run --locked python -m http.server 8765 --bind 127.0.0.1 --directory "$SITE" > "$WORK/http.log" 2>&1 &
 server_pid=$!
@@ -38,9 +47,13 @@ for ((attempt = 1; attempt <= 20; attempt++)); do
   if curl --fail --silent http://127.0.0.1:8765/manifest.json -o /dev/null; then break; fi
   sleep 1
 done
-curl --fail --silent http://127.0.0.1:8765/manifest.json -o /dev/null
+if ! curl --fail --silent --show-error http://127.0.0.1:8765/manifest.json -o /dev/null; then
+  cat "$WORK/http.log" >&2
+  exit 1
+fi
 
 for channel in stable prerelease; do
+  echo "Checking installation: $ARCH / $channel"
   uv run --locked python - "$SITE/manifest.json" "$channel" "$WORK" "$ARCH" > "$WORK/versions" <<'PY'
 import json, sys
 from pathlib import Path
@@ -58,7 +71,11 @@ PY
   docker run --rm --network host -v "$SITE:/feed:ro" -v "$WORK:/checks:ro" \
     -e "ARCH=$ARCH" -e "CHANNEL=$channel" -e "CORE_UPSTREAM=${versions[0]}" -e "BOOTSTRAP=${versions[1]}" \
     apk-repository-openwrt:check /bin/sh -eu -c '
-      test "$(apk --print-arch)" = "$ARCH"
+      actual_arch=$(cat /etc/apk/arch)
+      if [ "$actual_arch" != "$ARCH" ]; then
+        echo "OpenWrt package architecture mismatch: expected=$ARCH actual=$actual_arch" >&2
+        exit 1
+      fi
       mkdir -p /etc/apk/keys /etc/apk/repositories.d /var/lock
       cp /feed/apk/apk-repository.pem /etc/apk/keys/apk-repository.pem
       apk add --no-scripts "/feed/$BOOTSTRAP"
@@ -113,12 +130,17 @@ for name, channels in packages.items():
 PY
 
 while read -r package old_channel old_version new_channel new_version; do
+  echo "Checking upgrade: $ARCH / $package / $old_version -> $new_version"
   docker run --rm --network host -v "$SITE:/feed:ro" \
     -e "ARCH=$ARCH" -e "PACKAGE=$package" \
     -e "OLD_CHANNEL=$old_channel" -e "OLD_VERSION=$old_version" \
     -e "NEW_CHANNEL=$new_channel" -e "NEW_VERSION=$new_version" \
     apk-repository-openwrt:check /bin/sh -eu -c '
-      test "$(apk --print-arch)" = "$ARCH"
+      actual_arch=$(cat /etc/apk/arch)
+      if [ "$actual_arch" != "$ARCH" ]; then
+        echo "OpenWrt package architecture mismatch: expected=$ARCH actual=$actual_arch" >&2
+        exit 1
+      fi
       mkdir -p /etc/apk/keys /etc/apk/repositories.d /var/lock
       cp /feed/apk/apk-repository.pem /etc/apk/keys/apk-repository.pem
       printf "@lauyv http://127.0.0.1:8765/apk/%s/%s/packages.adb\n" "$OLD_CHANNEL" "$ARCH" > /etc/apk/repositories.d/customfeeds.list

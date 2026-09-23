@@ -62,6 +62,10 @@ public/
 
 ## CI 边界
 
+工具链通过 GitHub Actions Cache 缓存编译好的 APK Tools，缓存键包含 runner 系统、CPU 架构、镜像版本、工具配置和构建脚本摘要；仅精确命中时跳过编译，恢复后检查工具版本。运行库仍正常安装。uv 下载缓存按锁文件和 Python 配置失效，由 setup-uv 区分平台与架构。
+
+OpenWrt rootfs 按架构缓存，缓存键包含安装检查脚本摘要（含固定镜像 SHA-256），缓存文件以镜像摘要命名。无论下载还是缓存恢复，都在导入 Docker 前校验 SHA-256。缓存仅包含工具和依赖，不包含私钥或发布站点；站点仍从空目录生成。缓存丢失时正常重新构建或下载，Actions artifact 的 1 天保留策略不变。
+
 每日 UTC 04:23 先执行 `uv run --locked python -m apk_repository check-updates`，沿用构建阶段的 stable/prerelease 选择规则，将上游 Release、源码提交、资产 ID 和摘要与线上 `manifest.json` 比较。无变化时跳过后续任务，不请求签名审批；站点返回 404 时执行首次发布，其他网络或解析错误使检查失败。手动触发始终重新发布，适用于配置、代码或密钥变更。检查只读取元数据，构建阶段再次解析并校验上游实际资产。
 
 `assemble` 没有签名密钥；`sign` 只处理和签名包，不安装或执行包脚本；后续 `verify` 和 `check-installation` job 不接触生产私钥。OpenWrt 25.12.0 rootfs 的固定 URL 和 SHA-256 来自官方 [x86/64](https://downloads.openwrt.org/releases/25.12.0/targets/x86/64/) 和 [armsr/armv8](https://downloads.openwrt.org/releases/25.12.0/targets/armsr/armv8/) 镜像列表。安装检查分别在 `ubuntu-24.04` 和 `ubuntu-24.04-arm` 原生 runner 上执行；完整性检查和两架构安装检查都通过后才能部署。
