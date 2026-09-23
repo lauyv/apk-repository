@@ -49,7 +49,7 @@ APK Tools 使用 `3.0.5`、提交 `b5a31c0d865342ad80be10d68f1bb3d3ad9b0866`，�
 | `source` | 固定 GitHub `owner/repository` |
 | `method` | 当前只接受 `sync-apk` |
 | `channels` | 参与的通道 |
-| `license`、`license_reviewed` | 上游许可证标识和接入审核声明；源码及 LICENSE 随发布保留 |
+| `license`、`license_reviewed` | 上游许可证标识和接入审核声明；源码及许可证文件或上游 Makefile 中的许可证声明随发布保留 |
 | `revision` | 预期上游 APK 的 `-rN`，不是本仓库重新打包次数 |
 | `dependencies`、`conflicts` | 预期 APK 元数据，逐项精确校验 |
 | `architectures` | 精确架构到 `asset_pattern`、`package_arch` 的映射 |

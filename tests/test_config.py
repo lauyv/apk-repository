@@ -43,7 +43,7 @@ class ConfigTests(unittest.TestCase):
     def test_candidate_plan_exposes_blockers_and_generic_feed_url(self):
         result = plan(self.repo, self.packages, "latest", True)
         self.assertTrue(result["planning_only"])
-        self.assertEqual(len(result["jobs"]), 4)
+        self.assertEqual(len(result["jobs"]), sum(len(pkg["architectures"]) for pkg in self.packages))
         for job in result["jobs"]:
             self.assertIn("target-abi-required", job["blockers"])
             self.assertIn("license-review-required", job["blockers"])

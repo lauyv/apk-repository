@@ -44,7 +44,8 @@ class PublishTests(unittest.TestCase):
             return check_records(self.repo, self.packages, self.manifest, self.site, "apk")
 
     def test_complete_latest_only_set(self):
-        self.assertEqual(len(self.check()), 8)
+        self.assertEqual(len(self.check()), len(self.repo["channels"]) * sum(
+            len(pkg["architectures"]) for pkg in self.packages))
 
     def test_latest_accepts_a_stable_upstream_release(self):
         for record in self.manifest["packages"]:
@@ -58,7 +59,8 @@ class PublishTests(unittest.TestCase):
                 path = self.site / record["file"]
                 path.write_bytes(b"fixture: metadata mocked")
                 record["asset_sha256"] = record["sha256"] = sha256(path)
-        self.assertEqual(len(self.check()), 8)
+        self.assertEqual(len(self.check()), len(self.repo["channels"]) * sum(
+            len(pkg["architectures"]) for pkg in self.packages))
 
     def test_old_or_duplicate_version_cannot_enter_feed(self):
         extra = copy.deepcopy(self.manifest["packages"][0])

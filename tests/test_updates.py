@@ -6,6 +6,7 @@ import urllib.error
 from pathlib import Path
 from unittest.mock import patch
 
+from apk_repository.config import load
 from apk_repository.updates import check_updates
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,11 +27,13 @@ class UpdateTests(unittest.TestCase):
             return check_updates(ROOT)
 
     def manifest(self):
+        repo, packages = load(ROOT)
         records = []
-        for channel, arch in itertools.product(("stable", "latest"), ("x86_64", "aarch64_generic")):
-            for name, owner, revision in (("sing-box", "SagerNet", 0), ("luci-app-sing-box", "lauyv", 1)):
-                records.append({"channel": channel, "arch": arch, "name": name,
-                    "version": f"1.0.0-r{revision}", "source": f"{owner}/{name}",
+        for channel, target, pkg in itertools.product(repo["channels"], repo["targets"], packages):
+            arch = target["arch"]
+            if pkg["enabled"] and channel in pkg["channels"] and arch in pkg["architectures"]:
+                records.append({"channel": channel, "arch": arch, "name": pkg["name"],
+                    "version": f"1.0.0-r{pkg['revision']}", "source": pkg["source"],
                     "source_commit": "b" * 40, "release_id": 1, "release_tag": "v1.0.0",
                     "upstream_prerelease": False, "asset_id": 2,
                     "asset_sha256": "a" * 64})

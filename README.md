@@ -6,10 +6,11 @@
 
 首批接入：
 
-| 包                  | 用途          | 上游                      |
-| ------------------- | ------------- | ------------------------- |
-| `sing-box`          | 代理核心      | `SagerNet/sing-box`       |
-| `luci-app-sing-box` | LuCI 管理界面 | `lauyv/luci-app-sing-box` |
+| 包                   | 用途              | 上游                       |
+| -------------------- | ----------------- | -------------------------- |
+| `sing-box`           | 代理核心          | `SagerNet/sing-box`        |
+| `luci-app-sing-box`  | LuCI 管理界面     | `lauyv/luci-app-sing-box`  |
+| `luci-app-cake-tiny` | CAKE 流量整形界面 | `lauyv/luci-app-cake-tiny` |
 
 软件包来自上游编译好的 OpenWrt APK，保留原始内容和依赖。其他架构、opkg/IPK 系统不适用当前订阅地址。
 
@@ -50,9 +51,11 @@ mv /tmp/apk-repository.pem /etc/apk/keys/apk-repository.pem
 
 ### 4. 在页面安装和更新
 
-在 **系统 → 软件包 → 可用** 中搜索 `sing-box` 和 `luci-app-sing-box`，确认显示的版本与[软件源发布清单](https://lauyv.github.io/apk-repository/manifest.json)中所选通道、架构一致，再分别点击 **安装**。日后在该页面更新列表并更新这两个包即可。若页面列出多个同名包且无法确认所选版本来自本源，请先核对版本和软件源，避免装回其他来源的包。
+在 **系统 → 软件包 → 可用** 中搜索需要的 `sing-box`、`luci-app-sing-box` 或 `luci-app-cake-tiny`，确认显示的版本与[软件源发布清单](https://lauyv.github.io/apk-repository/manifest.json)中所选通道、架构一致，再点击 **安装**。日后在该页面更新列表并更新这些包即可。若页面列出多个同名包且无法确认所选版本来自本源，请先核对版本和软件源，避免装回其他来源的包。
 
 本源软件包依赖与当前固件匹配的官方内核模块。其他架构及 opkg/IPK 系统不适用上述地址。
+
+使用 CAKE Tiny 前，先停用其他占用 WAN 队列规则的流量整形服务，再在 **网络 → CAKE Tiny** 中启用并配置速率。
 
 切换通道时，在同一配置页面替换原有的本仓库地址，保存并更新列表。停止使用时，删除该行并更新列表；保留其他源和公钥文件。
 
