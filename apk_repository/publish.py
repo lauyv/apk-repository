@@ -38,8 +38,6 @@ def check_records(repo, packages, manifest, site, apk, keys=None):
         require(record["version"] == version + "-r" + str(pkg["revision"]), "wrong APK version")
         if record["channel"] == "stable":
             require(not record["upstream_prerelease"], "prerelease package in stable feed")
-        elif not pkg["prerelease_fallback"]:
-            require(record["upstream_prerelease"], "stable package in strict prerelease feed")
         expected_file = "apk/{}/{}/{}-{}.apk".format(*identity[:2], record["name"], record["version"])
         require(record["file"] == expected_file, "noncanonical APK filename")
         path = child(site, record["file"])
@@ -64,11 +62,12 @@ def bootstrap(apk, repo, site, work, channel, arch, version, license_path):
     license_directory = root / "usr/share/licenses" / name
     license_directory.mkdir(parents=True)
     shutil.copyfile(license_path, license_directory / "LICENSE")
-    opposite = "prerelease" if channel == "stable" else "stable"
+    # Keep the retired prerelease bootstrap incompatible with newly published feeds.
+    other_channels = [other for other in (*repo["channels"], "prerelease") if other != channel]
     path = site / "apk" / channel / arch / (name + "-" + version + ".apk")
     make_package(apk, root, path, {"name": name, "version": version, "arch": arch,
         "license": "MIT", "description": f"apk-repository {channel} feed configuration",
-        "depends": "!apk-repository-" + opposite})
+        "depends": " ".join("!apk-repository-" + other for other in other_channels)})
     return {"name": name, "version": version, "channel": channel, "arch": arch,
             "file": path.relative_to(site).as_posix()}
 
@@ -85,7 +84,7 @@ def render_site(repo, site, manifest):
     page = '''<!doctype html><html lang="zh-CN"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>apk-repository</title>
 <style>body{font:16px/1.6 system-ui,sans-serif;max-width:1000px;margin:48px auto;padding:0 24px;color:#18202b}table{border-collapse:collapse;width:100%}th,td{text-align:left;padding:10px;border-bottom:1px solid #ddd}code,pre{background:#f3f5f7;padding:4px;overflow:auto}a{color:#1859ac}</style>
-<h1>apk-repository</h1><p>OpenWrt 25.12 APK 软件源。仅保留最新正式版和最新预发布版。</p>
+<h1>apk-repository</h1><p>OpenWrt 25.12 APK 软件源。stable 和 latest 通道分别保留当前版本。</p>
 <p><a href="apk/apk-repository.pem">仓库公钥</a> · <a href="manifest.json">发布清单</a> · <a href="SHA256SUMS">SHA-256</a> · <a href="SHA256SUMS.sig">清单签名</a> · <a href="install.txt">安装说明</a></p>
 <p>公钥 SHA-256：<code>FINGERPRINT</code></p><ul>FEEDS</ul>
 <table><thead><tr><th>通道</th><th>架构</th><th>包</th><th>版本</th><th>下载</th></tr></thead><tbody>ROWS</tbody></table>
@@ -117,7 +116,7 @@ apk add -u {selected}
   set -eu
   cp -p /etc/apk/world /etc/apk/world.before-apk-repository-removal
   sed -i -E 's/@lauyv([<>=~]|$)/\1/g' /etc/apk/world
-  for package in apk-repository-stable apk-repository-prerelease; do
+  for package in apk-repository-stable apk-repository-latest apk-repository-prerelease; do
     if apk info -e "$package" >/dev/null 2>&1; then
       apk del "$package"
     fi
@@ -234,4 +233,4 @@ def verify(root, apk, site):
             entries = data.get("packages", [])
             require(len(entries) == len(expected) and {(p["name"], p["version"]) for p in entries} == expected,
                     "index contains missing, duplicate or historical packages")
-    print("Signed site verified: only current stable/prerelease packages are present.")
+    print("Signed site verified: only current configured-channel packages are present.")

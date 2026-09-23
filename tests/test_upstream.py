@@ -7,7 +7,10 @@ from unittest.mock import patch
 
 from apk_repository.config import ConfigError
 from apk_repository.upstream import (
+    api_json,
     download,
+    resolve_release,
+    resolve_tag_commit,
     select_asset,
     select_release,
     version_parts,
@@ -19,17 +22,48 @@ class UpstreamTests(unittest.TestCase):
         return {"id": int(published), "tag_name": tag, "prerelease": prerelease,
                 "published_at": published, "draft": draft}
 
-    def test_channels_are_strictly_separated(self):
+    def test_stable_excludes_prereleases(self):
         releases = [self.release("v1.2.0", False, "2"), self.release("v1.3.0-beta.1", True, "1"),
                     self.release("v1.4.0", False, "3", True)]
         self.assertEqual(select_release(releases, "stable")["tag_name"], "v1.2.0")
-        self.assertEqual(select_release(releases, "prerelease")["tag_name"], "v1.3.0-beta.1")
 
     def test_only_latest_eligible_release_selected(self):
         releases = [self.release("v1.1.0", False, "1"), self.release("v1.2.0", False, "2")]
         self.assertEqual(select_release(releases, "stable")["tag_name"], "v1.2.0")
 
-    def test_missing_prerelease_does_not_silently_select_stable(self):
+    def test_latest_ignores_release_channel_and_drafts(self):
+        releases = [self.release("v1.2.0", False, "2"), self.release("v1.3.0-beta.1", True, "3"),
+                    self.release("v1.4.0", False, "4", True)]
+        self.assertEqual(select_release(releases, "latest")["tag_name"], "v1.3.0-beta.1")
+        releases.append(self.release("v1.3.0", False, "5"))
+        self.assertEqual(select_release(releases, "latest")["tag_name"], "v1.3.0")
+
+    def test_latest_scans_all_release_pages(self):
+        older = self.release("v1.2.0", False, "2")
+        newer = self.release("v1.3.0-beta.1", True, "3")
+        with patch("apk_repository.upstream.api_json", side_effect=[
+            [older] * 10, [newer], {"object": {"type": "commit", "sha": "a" * 40}},
+        ]) as api:
+            release, commit = resolve_release("owner/tool", "latest")
+        self.assertEqual((release["tag_name"], commit), ("v1.3.0-beta.1", "a" * 40))
+        self.assertEqual(api.call_args_list[1].args[0], "repos/owner/tool/releases?per_page=10&page=2")
+
+    def test_annotated_tag_resolves_to_commit(self):
+        with patch("apk_repository.upstream.api_json", side_effect=[
+            {"object": {"type": "tag", "sha": "a" * 40}},
+            {"object": {"type": "commit", "sha": "b" * 40}},
+        ]) as api:
+            self.assertEqual(resolve_tag_commit("owner/tool", "v1.0.0"), "b" * 40)
+        self.assertEqual(api.call_args_list[1].args[0], "repos/owner/tool/git/tags/" + "a" * 40)
+
+    def test_truncated_api_json_is_retried(self):
+        with (patch("apk_repository.upstream.open_url", side_effect=[
+            io.BytesIO(b'{"incomplete":"'), io.BytesIO(b'{"ok":true}'),
+        ]) as opened, patch("apk_repository.upstream.time.sleep")):
+            self.assertEqual(api_json("repos/owner/tool/releases"), {"ok": True})
+        self.assertEqual(opened.call_count, 2)
+
+    def test_removed_prerelease_channel_is_rejected(self):
         with self.assertRaises(ConfigError):
             select_release([self.release("v1.2.0", False, "1")], "prerelease")
 

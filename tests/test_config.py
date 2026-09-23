@@ -41,13 +41,13 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(plan(repo, packages, "stable")["jobs"], [])
 
     def test_candidate_plan_exposes_blockers_and_generic_feed_url(self):
-        result = plan(self.repo, self.packages, "prerelease", True)
+        result = plan(self.repo, self.packages, "latest", True)
         self.assertTrue(result["planning_only"])
         self.assertEqual(len(result["jobs"]), 4)
         for job in result["jobs"]:
             self.assertIn("target-abi-required", job["blockers"])
             self.assertIn("license-review-required", job["blockers"])
-            self.assertEqual(job["index_url"], f"https://lauyv.github.io/apk-repository/apk/prerelease/{job['arch']}/packages.adb")
+            self.assertEqual(job["index_url"], f"https://lauyv.github.io/apk-repository/apk/latest/{job['arch']}/packages.adb")
 
     def test_new_package_needs_no_planner_changes(self):
         pkg = copy.deepcopy(self.packages[1])
@@ -63,7 +63,7 @@ class ConfigTests(unittest.TestCase):
         jobs = plan(repo, packages, "stable")["jobs"]
         self.assertEqual([j["package"] for j in jobs], ["example-tool"])
         self.assertEqual(jobs[0]["blockers"], [])
-        self.assertEqual(plan(repo, packages, "prerelease")["jobs"], [])
+        self.assertEqual(plan(repo, packages, "latest")["jobs"], [])
 
     def test_path_traversal(self):
         self.repo["packages"] = ["../outside"]

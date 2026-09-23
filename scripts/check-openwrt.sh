@@ -52,7 +52,7 @@ if ! curl --fail --silent --show-error http://127.0.0.1:8765/manifest.json -o /d
   exit 1
 fi
 
-for channel in stable prerelease; do
+for channel in stable latest; do
   echo "Checking installation: $ARCH / $channel"
   uv run --locked python - "$SITE/manifest.json" "$channel" "$WORK" "$ARCH" > "$WORK/versions" <<'PY'
 import json, sys
@@ -100,7 +100,7 @@ PY
     '
 done
 
-# Use the two retained releases for real upgrades, without publishing historical APKs.
+# Compare stable and latest for real upgrades, without publishing historical APKs.
 uv run --locked python - "$SITE/manifest.json" "$ARCH" "$TOOLS_DIR/apk" > "$WORK/upgrades" <<'PY'
 import json
 import subprocess
@@ -113,10 +113,10 @@ for record in manifest["packages"]:
     if record["arch"] == sys.argv[2]:
         packages.setdefault(record["name"], {})[record["channel"]] = record
 for name, channels in packages.items():
-    if set(channels) != {"stable", "prerelease"}:
+    if set(channels) != {"stable", "latest"}:
         print(f"SKIP upgrade {name}: only one channel", file=sys.stderr)
         continue
-    low, high = channels["stable"], channels["prerelease"]
+    low, high = channels["stable"], channels["latest"]
     comparison = subprocess.run([sys.argv[3], "version", "-t", low["version"], high["version"]],
                                 check=True, capture_output=True, text=True).stdout.strip()
     if comparison == "=":

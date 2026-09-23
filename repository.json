@@ -2,7 +2,7 @@
   "schema_version": 1,
   "name": "apk-repository",
   "base_url": "https://lauyv.github.io/apk-repository",
-  "channels": ["stable", "prerelease"],
+  "channels": ["stable", "latest"],
   "apk_tools": {
     "version": "3.0.5",
     "source": "https://gitlab.alpinelinux.org/alpine/apk-tools.git",

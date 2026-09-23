@@ -61,7 +61,7 @@ jobs:
           uv run --locked python -m apk_repository validate
           uv run --locked ruff check .
           uv run --locked python -m unittest discover -s tests -v
-      - name: Synchronize latest stable and prerelease APKs
+      - name: Synchronize APKs for all channels
         env:
           GH_TOKEN: ${{ github.token }}
         run: uv run --locked python -m apk_repository build --apk "$TOOLS_DIR/apk" --output build/unsigned

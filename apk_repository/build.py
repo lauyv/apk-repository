@@ -51,9 +51,9 @@ def build(root, apk, output):
             for pkg in packages:
                 if not pkg["enabled"] or channel not in pkg["channels"]:
                     continue
-                key = (pkg["source"], channel, pkg["prerelease_fallback"])
+                key = (pkg["source"], channel)
                 if key not in resolutions:
-                    resolutions[key] = resolve_release(pkg["source"], channel, fallback=pkg["prerelease_fallback"])
+                    resolutions[key] = resolve_release(pkg["source"], channel)
                 release, commit = resolutions[key]
                 _, apk_version = version_parts(release["tag_name"])
                 version = apk_version + "-r" + str(pkg["revision"])

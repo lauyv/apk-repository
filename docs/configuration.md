@@ -10,7 +10,7 @@
 uv sync --locked
 uv run --locked ruff check .
 uv run --locked python -m apk_repository validate
-uv run --locked python -m apk_repository plan --channel prerelease
+uv run --locked python -m apk_repository plan --channel latest
 uv run --locked python -m unittest discover -s tests -v
 
 # 需要固定版本的 APK Tools；输出目录必须尚不存在
@@ -31,7 +31,7 @@ uv run --locked python -m apk_repository verify --apk build/tools/apk --site bui
 | `schema_version` | 当前为整数 `1` |
 | `name` | `apk-repository` |
 | `base_url` | HTTPS 站点地址，不含末尾斜杠 |
-| `channels` | `stable`、`prerelease` |
+| `channels` | `stable`、`latest` |
 | `apk_tools` | 固定源码地址、完整提交 SHA 和版本 |
 | `packages` | 已注册包名，读取 `packages/<name>/package.json` |
 | `targets` | 精确 OpenWrt 包架构和 ABI；当前为 `x86_64`、`aarch64_generic`，ABI 均为 `openwrt-25.12` |
@@ -49,7 +49,6 @@ APK Tools 使用 `3.0.5`、提交 `b5a31c0d865342ad80be10d68f1bb3d3ad9b0866`，�
 | `source` | 固定 GitHub `owner/repository` |
 | `method` | 当前只接受 `sync-apk` |
 | `channels` | 参与的通道 |
-| `prerelease_fallback` | 没有预发布记录时，是否允许 prerelease 通道复用最新正式版 |
 | `license`、`license_reviewed` | 上游许可证标识和接入审核声明；源码及 LICENSE 随发布保留 |
 | `revision` | 预期上游 APK 的 `-rN`，不是本仓库重新打包次数 |
 | `dependencies`、`conflicts` | 预期 APK 元数据，逐项精确校验 |
@@ -59,7 +58,7 @@ APK Tools 使用 `3.0.5`、提交 `b5a31c0d865342ad80be10d68f1bb3d3ad9b0866`，�
 
 `asset_pattern` 必须含 `{version}`，根据实际 Release API 资产列表精确匹配；不通过模板构造下载地址。sing-box 只选 `openwrt` 命名的资产。架构无关的 LuCI 包可为 `noarch`，索引仍按设备架构分别发布。
 
-正式版使用 GitHub 的 latest Release API。预发布在最近 100 条 Release 中按发布时间选择最新非草稿预发布记录；只有完整读取历史并确认没有预发布版、且显式允许 fallback 的包，才能复用正式版。若超过查询窗口又找不到预发布，则失败而不猜测。API 分页读取，摘要缺失、元数据变化、资产缺失均阻止发布。
+`stable` 使用 GitHub 的 latest Release API 选择正式版。`latest` 遍历完整 Release 列表，按发布时间选择最新非草稿记录，不区分正式版和预发布版。API 分页读取，摘要缺失、元数据变化、资产缺失均阻止发布。
 
 sing-box 的 `-r0`、OpenWrt 架构名和依赖声明依据[上游 APK 打包脚本](https://github.com/SagerNet/sing-box/blob/v1.14.1/.github/build_openwrt_apk.sh)登记，流水线还会对每次实际下载的包重新检查。
 

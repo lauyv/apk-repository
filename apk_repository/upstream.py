@@ -67,10 +67,16 @@ def open_url(url, api=False):
 
 
 def api_json(path):
-    with open_url("https://api.github.com/" + path, api=True) as response:
-        content = response.read(16 * 1024 * 1024 + 1)
-    require(len(content) <= 16 * 1024 * 1024, "API response too large")
-    return json.loads(content)
+    for attempt in range(3):
+        with open_url("https://api.github.com/" + path, api=True) as response:
+            content = response.read(16 * 1024 * 1024 + 1)
+        require(len(content) <= 16 * 1024 * 1024, "API response too large")
+        try:
+            return json.loads(content)
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            if attempt == 2:
+                raise ValueError("invalid GitHub API JSON from " + path) from exc
+            time.sleep(2 ** attempt)
 
 
 def download(url, destination, digest=None, size=None):
@@ -99,8 +105,9 @@ def download(url, destination, digest=None, size=None):
 
 
 def select_release(releases, channel, tag=None):
+    require(channel in ("stable", "latest"), "unknown channel: " + channel)
     candidates = [r for r in releases if not r.get("draft") and r.get("published_at")
-                  and bool(r.get("prerelease")) == (channel == "prerelease")
+                  and (channel == "latest" or not r.get("prerelease"))
                   and (tag is None or r.get("tag_name") == tag)]
     require(candidates, "no eligible Release for " + channel + (": " + tag if tag else ""))
     selected = max(candidates, key=lambda r: (r["published_at"], r["id"]))
@@ -110,31 +117,39 @@ def select_release(releases, channel, tag=None):
     return selected
 
 
-def resolve_release(source, channel, tag=None, fallback=False):
-    history_complete = False
+def resolve_tag_commit(source, tag):
+    quoted = urllib.parse.quote(tag, safe="")
+    reference = api_json(f"repos/{source}/git/ref/tags/{quoted}")
+    target = reference["object"]
+    for _ in range(5):
+        sha = target["sha"]
+        require(isinstance(sha, str) and re.fullmatch(r"[0-9a-f]{40}", sha), "invalid upstream commit")
+        if target["type"] == "commit":
+            return sha
+        require(target["type"] == "tag", "release tag does not point to a commit")
+        target = api_json(f"repos/{source}/git/tags/{sha}")["object"]
+    require(False, "release tag indirection is too deep")
+
+
+def resolve_release(source, channel, tag=None):
     if tag:
         releases = [api_json("repos/{}/releases/tags/{}".format(source, urllib.parse.quote(tag, safe="")))]
     elif channel == "stable":
         releases = [api_json(f"repos/{source}/releases/latest")]
-    else:
-        # Bound requests; fail closed if the selected release is outside this window.
+    elif channel == "latest":
         releases = []
-        for page in range(1, 11):
+        page = 1
+        while True:
             batch = api_json(f"repos/{source}/releases?per_page=10&page={page}")
             require(isinstance(batch, list), "invalid Release API response")
             releases.extend(batch)
             if len(batch) < 10:
-                history_complete = True
                 break
-    if fallback and channel == "prerelease" and not tag and not any(
-        r.get("prerelease") and not r.get("draft") and r.get("published_at") for r in releases
-    ):
-        require(history_complete, "no prerelease in the lookup window; cannot safely infer that none exists")
-        channel = "stable"
-        releases = [api_json(f"repos/{source}/releases/latest")]
+            page += 1
+    else:
+        require(False, "unknown channel: " + channel)
     release = select_release(releases, channel, tag)
-    commit = api_json("repos/{}/commits/{}".format(source, urllib.parse.quote(release["tag_name"], safe="")))["sha"]
-    require(re.fullmatch(r"[0-9a-f]{40}", commit), "invalid upstream commit")
+    commit = resolve_tag_commit(source, release["tag_name"])
     return release, commit
 
 

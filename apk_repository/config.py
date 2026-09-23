@@ -58,8 +58,8 @@ def load(root):
     require(url.scheme == "https" and url.hostname and not url.username and not url.password
             and not url.query and not url.fragment and not repo["base_url"].endswith("/"),
             "base_url must be an HTTPS URL without credentials, query, fragment or trailing slash")
-    string_list(repo["channels"], "channels", ["stable", "prerelease"])
-    require(set(repo["channels"]) == {"stable", "prerelease"}, "both channels are required")
+    string_list(repo["channels"], "channels", ["stable", "latest"])
+    require(set(repo["channels"]) == {"stable", "latest"}, "both channels are required")
     tool = repo["apk_tools"]
     fields(tool, "version source commit", "apk_tools")
     require(matches(tool["version"], r"3\.\d+\.\d+"), "apk_tools must pin a v3 release")
@@ -83,13 +83,12 @@ def load(root):
         path = root / "packages" / name / "package.json"
         require(root in path.resolve().parents, "package path escapes repository")
         pkg = read_json(path)
-        fields(pkg, "schema_version name enabled source method channels license license_reviewed prerelease_fallback revision dependencies conflicts architectures", name)
+        fields(pkg, "schema_version name enabled source method channels license license_reviewed revision dependencies conflicts architectures", name)
         require(type(pkg["schema_version"]) is int and pkg["schema_version"] == 1, name + ": unsupported schema")
         require(pkg["name"] == name, name + ": package name mismatch")
         require(type(pkg["enabled"]) is bool and type(pkg["license_reviewed"]) is bool, name + ": flags must be boolean")
         require(matches(pkg["source"], r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+"), name + ": expected owner/repository")
         require(pkg["method"] == "sync-apk", name + ": only upstream APK synchronization is supported")
-        require(type(pkg["prerelease_fallback"]) is bool, name + ": prerelease_fallback must be boolean")
         require(type(pkg["revision"]) is int and pkg["revision"] >= 0, name + ": revision must be nonnegative")
         require(isinstance(pkg["license"], str) and pkg["license"], name + ": license required")
         string_list(pkg["channels"], name + ": channels", repo["channels"])

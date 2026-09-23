@@ -21,7 +21,7 @@ class PublishTests(unittest.TestCase):
         self.manifest = {"schema_version": 1, "apk_tools": self.repo["apk_tools"],
                          "base_url": self.repo["base_url"], "packages": []}
         for channel in self.repo["channels"]:
-            prerelease = channel == "prerelease"
+            prerelease = channel != "stable"
             for pkg, target in itertools.product(self.packages, self.repo["targets"]):
                 arch = target["arch"]
                 version = ("1.3.0_beta1" if prerelease else "1.2.3") + "-r" + str(pkg["revision"])
@@ -44,6 +44,20 @@ class PublishTests(unittest.TestCase):
             return check_records(self.repo, self.packages, self.manifest, self.site, "apk")
 
     def test_complete_latest_only_set(self):
+        self.assertEqual(len(self.check()), 8)
+
+    def test_latest_accepts_a_stable_upstream_release(self):
+        for record in self.manifest["packages"]:
+            if record["channel"] == "latest":
+                record["release_tag"] = "v1.2.3"
+                record["version"] = "1.2.3-r" + str(next(
+                    pkg["revision"] for pkg in self.packages if pkg["name"] == record["name"]))
+                record["upstream_prerelease"] = False
+                record["file"] = "apk/{}/{}/{}-{}.apk".format(
+                    record["channel"], record["arch"], record["name"], record["version"])
+                path = self.site / record["file"]
+                path.write_bytes(b"fixture: metadata mocked")
+                record["asset_sha256"] = record["sha256"] = sha256(path)
         self.assertEqual(len(self.check()), 8)
 
     def test_old_or_duplicate_version_cannot_enter_feed(self):
