@@ -1,0 +1,20 @@
+name: Set up repository toolchain
+description: Install uv, Python and pinned APK Tools on the Linux CI runner
+runs:
+  using: composite
+  steps:
+    - uses: astral-sh/setup-uv@v10.2.0
+      with:
+        version: "0.12.18"
+        enable-cache: false
+    - name: Install Python project
+      shell: bash
+      run: uv sync --locked
+    - name: Install APK Tools build dependencies
+      shell: bash
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y --no-install-recommends build-essential meson ninja-build pkg-config libssl-dev zlib1g-dev libzstd-dev fakeroot wget curl
+    - name: Compile pinned APK Tools
+      shell: bash
+      run: bash scripts/prepare-tools.sh

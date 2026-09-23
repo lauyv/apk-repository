@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "name": "sing-box",
+  "enabled": true,
+  "source": "SagerNet/sing-box",
+  "method": "sync-apk",
+  "channels": ["stable", "prerelease"],
+  "license": "GPL-3.0-or-later",
+  "license_reviewed": true,
+  "prerelease_fallback": false,
+  "revision": 0,
+  "dependencies": ["ca-bundle", "kmod-inet-diag", "kmod-tun", "firewall4", "kmod-nft-queue"],
+  "conflicts": [],
+  "architectures": {
+    "x86_64": {
+      "asset_pattern": "sing-box_{version}_openwrt_x86_64.apk",
+      "package_arch": "x86_64"
+    }
+  }
+}

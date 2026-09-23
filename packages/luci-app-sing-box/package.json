@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "name": "luci-app-sing-box",
+  "enabled": true,
+  "source": "lauyv/luci-app-sing-box",
+  "method": "sync-apk",
+  "channels": ["stable", "prerelease"],
+  "license": "MIT",
+  "license_reviewed": true,
+  "prerelease_fallback": true,
+  "revision": 1,
+  "dependencies": ["luci-base", "sing-box", "rpcd", "jshn", "jsonfilter"],
+  "conflicts": [],
+  "architectures": {
+    "x86_64": {
+      "asset_pattern": "luci-app-sing-box-{version}-r1.apk",
+      "package_arch": "noarch"
+    }
+  }
+}

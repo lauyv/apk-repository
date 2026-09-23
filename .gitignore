@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.venv/
+.ruff_cache/
+.DS_Store
+/build/
+/dist/
+/public/
+/.secrets/
+*.key
+*.priv
+*.pem
+!keys/*.pem

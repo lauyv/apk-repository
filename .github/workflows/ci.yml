@@ -1,0 +1,29 @@
+name: Validate repository
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: "0.12.18"
+          enable-cache: false
+      - run: uv sync --locked
+      - name: Validate package configuration
+        run: uv run --locked python -m apk_repository validate
+      - name: Run offline tests
+        run: uv run --locked python -m unittest discover -s tests -v
+      - name: Check Python with Ruff
+        run: uv run --locked ruff check .
+      - name: Preview candidate jobs
+        run: uv run --locked python -m apk_repository plan --channel stable --include-disabled
