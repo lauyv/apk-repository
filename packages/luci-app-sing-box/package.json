@@ -12,6 +12,10 @@
   "dependencies": ["luci-base", "sing-box", "rpcd", "jshn", "jsonfilter", "uclient-fetch"],
   "conflicts": [],
   "architectures": {
+    "aarch64_generic": {
+      "asset_pattern": "luci-app-sing-box-{version}-r1.apk",
+      "package_arch": "noarch"
+    },
     "x86_64": {
       "asset_pattern": "luci-app-sing-box-{version}-r1.apk",
       "package_arch": "noarch"

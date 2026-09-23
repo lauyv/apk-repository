@@ -1,4 +1,5 @@
 import copy
+import itertools
 import tempfile
 import unittest
 from pathlib import Path
@@ -21,9 +22,10 @@ class PublishTests(unittest.TestCase):
                          "base_url": self.repo["base_url"], "packages": []}
         for channel in self.repo["channels"]:
             prerelease = channel == "prerelease"
-            for pkg in self.packages:
+            for pkg, target in itertools.product(self.packages, self.repo["targets"]):
+                arch = target["arch"]
                 version = ("1.3.0_beta1" if prerelease else "1.2.3") + "-r" + str(pkg["revision"])
-                relative = "apk/{}/x86_64/{}-{}.apk".format(channel, pkg["name"], version)
+                relative = "apk/{}/{}/{}-{}.apk".format(channel, arch, pkg["name"], version)
                 path = self.site / relative
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(b"fixture: metadata mocked")
@@ -31,7 +33,7 @@ class PublishTests(unittest.TestCase):
                 source = self.site / source_rel
                 source.parent.mkdir(parents=True, exist_ok=True)
                 source.write_bytes(b"fixture source")
-                self.manifest["packages"].append({"name": pkg["name"], "channel": channel, "arch": "x86_64",
+                self.manifest["packages"].append({"name": pkg["name"], "channel": channel, "arch": arch,
                     "abi": "openwrt-25.12", "source": pkg["source"], "release_tag": "v1.3.0-beta.1" if prerelease else "v1.2.3",
                     "upstream_prerelease": prerelease, "version": version, "file": relative,
                     "source_archive": source_rel, "source_sha256": sha256(source),
@@ -42,7 +44,7 @@ class PublishTests(unittest.TestCase):
             return check_records(self.repo, self.packages, self.manifest, self.site, "apk")
 
     def test_complete_latest_only_set(self):
-        self.assertEqual(len(self.check()), 4)
+        self.assertEqual(len(self.check()), 8)
 
     def test_old_or_duplicate_version_cannot_enter_feed(self):
         extra = copy.deepcopy(self.manifest["packages"][0])
@@ -53,6 +55,11 @@ class PublishTests(unittest.TestCase):
 
     def test_missing_channel_package_blocks_publication(self):
         self.manifest["packages"].pop()
+        with self.assertRaisesRegex(ConfigError, "missing"):
+            self.check()
+
+    def test_missing_architecture_blocks_publication(self):
+        self.manifest["packages"] = [record for record in self.manifest["packages"] if record["arch"] == "x86_64"]
         with self.assertRaisesRegex(ConfigError, "missing"):
             self.check()
 

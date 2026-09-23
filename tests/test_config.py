@@ -17,7 +17,8 @@ class ConfigTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.repo, self.packages = copy.deepcopy(load(ROOT))
-        self.repo["targets"][0]["abi"] = None
+        for target in self.repo["targets"]:
+            target["abi"] = None
         for pkg in self.packages:
             pkg["enabled"] = False
             pkg["license_reviewed"] = False
@@ -42,16 +43,17 @@ class ConfigTests(unittest.TestCase):
     def test_candidate_plan_exposes_blockers_and_generic_feed_url(self):
         result = plan(self.repo, self.packages, "prerelease", True)
         self.assertTrue(result["planning_only"])
-        self.assertEqual(len(result["jobs"]), 2)
+        self.assertEqual(len(result["jobs"]), 4)
         for job in result["jobs"]:
             self.assertIn("target-abi-required", job["blockers"])
             self.assertIn("license-review-required", job["blockers"])
-            self.assertEqual(job["index_url"], "https://lauyv.github.io/apk-repository/apk/prerelease/x86_64/packages.adb")
+            self.assertEqual(job["index_url"], f"https://lauyv.github.io/apk-repository/apk/prerelease/{job['arch']}/packages.adb")
 
     def test_new_package_needs_no_planner_changes(self):
         pkg = copy.deepcopy(self.packages[1])
         pkg.update(name="example-tool", source="example/tool", enabled=True, license_reviewed=True,
                    channels=["stable"])
+        pkg["architectures"] = {"x86_64": pkg["architectures"]["x86_64"]}
         pkg["architectures"]["x86_64"].update(asset_pattern="tool-{version}-x86_64.apk")
         self.repo["targets"][0]["abi"] = "test-abi"
         self.repo["packages"].append(pkg["name"])

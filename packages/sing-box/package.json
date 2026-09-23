@@ -12,6 +12,10 @@
   "dependencies": ["ca-bundle", "kmod-inet-diag", "kmod-tun", "firewall4", "kmod-nft-queue"],
   "conflicts": [],
   "architectures": {
+    "aarch64_generic": {
+      "asset_pattern": "sing-box_{version}_openwrt_aarch64_generic.apk",
+      "package_arch": "aarch64_generic"
+    },
     "x86_64": {
       "asset_pattern": "sing-box_{version}_openwrt_x86_64.apk",
       "package_arch": "x86_64"

@@ -34,7 +34,7 @@ uv run --locked python -m apk_repository verify --apk build/tools/apk --site bui
 | `channels` | `stable`、`prerelease` |
 | `apk_tools` | 固定源码地址、完整提交 SHA 和版本 |
 | `packages` | 已注册包名，读取 `packages/<name>/package.json` |
-| `targets` | 精确 OpenWrt 包架构和 ABI；当前为 `x86_64`、`openwrt-25.12` |
+| `targets` | 精确 OpenWrt 包架构和 ABI；当前为 `x86_64`、`aarch64_generic`，ABI 均为 `openwrt-25.12` |
 
 当前路径不包含 ABI，禁止混放不同 ABI。扩展其他固件系列时应先扩展 URL 和相应安装检查，不能直接修改现有 feed 的含义。
 
@@ -67,4 +67,4 @@ sing-box 的 `-r0`、OpenWrt 架构名和依赖声明依据[上游 APK 打包脚
 
 新增包时添加独立 `package.json` 并注册到根配置即可复用同步、签名和索引流程。先确认 APK v3 格式、来源、版本规则、许可证和精确依赖；`build` 会重新核对这些声明。上游有不同元数据时应审查后更新配置，不在流水线中自动放宽。
 
-新增架构需要添加 target、各包的精确资产映射，并为 `scripts/check-openwrt.sh` 增加相应 OpenWrt rootfs/执行环境。当前安装检查只覆盖 x86_64；不能把新增架构宣称为已经过安装验证。
+新增架构需要添加 target 和各包的精确资产映射。`aarch64_generic` 同步上游 `sing-box_{version}_openwrt_aarch64_generic.apk`，LuCI 复用 `noarch` APK；两架构均执行包元数据、签名和索引校验。`scripts/check-openwrt.sh <site> <arch>` 在对应原生 runner 上检查容器安装和跨版本升级，发布须等待两架构检查完成。新增架构还需增加固定 rootfs、摘要和工作流矩阵；实际验证结果以远端 Actions 为准。

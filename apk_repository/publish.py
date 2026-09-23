@@ -60,7 +60,7 @@ def bootstrap(apk, repo, site, work, channel, arch, version, license_path):
     shutil.copyfile(site / "apk/apk-repository.pem", keys / "apk-repository.pem")
     feeds = root / "etc/apk/repositories.d"
     feeds.mkdir(parents=True)
-    (feeds / "apk-repository.list").write_text("@apk_repository {}/apk/{}/{}/packages.adb\n".format(repo["base_url"], channel, arch))
+    (feeds / "apk-repository.list").write_text("@lauyv {}/apk/{}/{}/packages.adb\n".format(repo["base_url"], channel, arch))
     license_directory = root / "usr/share/licenses" / name
     license_directory.mkdir(parents=True)
     shutil.copyfile(license_path, license_directory / "LICENSE")
@@ -96,7 +96,7 @@ def render_site(repo, site, manifest):
     sections = ["apk-repository\n仅适用于已列出的 OpenWrt APK v3 架构。保留设备官方软件源以解析依赖。\n",
                 "先从维护者或本次可信 Actions 日志确认公钥 SHA-256：" + manifest["key_sha256"] + "\n"]
     for feed in manifest["bootstrap"]:
-        selected = " ".join(record["name"] + "@apk_repository" for record in manifest["packages"]
+        selected = " ".join(record["name"] + "@lauyv" for record in manifest["packages"]
                             if record["channel"] == feed["channel"] and record["arch"] == feed["arch"])
         command = """\n{channel} / {arch}：
 wget -O /tmp/apk-repository.pem '{base}/apk/apk-repository.pem'
@@ -116,12 +116,16 @@ apk add -u {selected}
 (
   set -eu
   cp -p /etc/apk/world /etc/apk/world.before-apk-repository-removal
-  sed -i -E 's/@apk_repository([<>=~]|$)/\1/g' /etc/apk/world
+  sed -i -E 's/@lauyv([<>=~]|$)/\1/g' /etc/apk/world
   for package in apk-repository-stable apk-repository-prerelease; do
     if apk info -e "$package" >/dev/null 2>&1; then
       apk del "$package"
     fi
   done
+  if [ -f /etc/apk/repositories.d/customfeeds.list ]; then
+    cp -p /etc/apk/repositories.d/customfeeds.list /etc/apk/repositories.d/customfeeds.list.bak
+    sed -i '/^[[:space:]]*@lauyv[[:space:]]/d' /etc/apk/repositories.d/customfeeds.list
+  fi
   rm -f /etc/apk/repositories.d/apk-repository.list
   rm -f /etc/apk/keys/apk-repository.pem
 )

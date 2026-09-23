@@ -10,6 +10,7 @@
   },
   "packages": ["luci-app-sing-box", "sing-box"],
   "targets": [
-    {"arch": "x86_64", "abi": "openwrt-25.12"}
+    {"arch": "x86_64", "abi": "openwrt-25.12"},
+    {"arch": "aarch64_generic", "abi": "openwrt-25.12"}
   ]
 }

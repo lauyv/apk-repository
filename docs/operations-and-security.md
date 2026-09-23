@@ -30,7 +30,7 @@
 
 Bootstrap 只管理本仓库专用配置和公钥，不覆盖官方 feeds 或用户自己的 `customfeeds.list`。如果专用文件被用户修改，APK 可能按配置文件保护策略保留它。面向订阅者的移除步骤统一放在[项目 README](../README.md)。
 
-通过 `包名@apk_repository` 安装会把仓库标签持久写入 `/etc/apk/world`。移除订阅或更换 bootstrap 前，必须先备份 world 并仅清理此标签，保留应用包条目和版本约束，再卸载配置包、删除专用文件；否则后续 APK 操作会因缺失仓库标签而失败。切换通道后按安装步骤重新添加标签。生成的 `install.txt` 与 README 使用相同顺序。
+通过 `包名@lauyv` 安装会把仓库标签持久写入 `/etc/apk/world`。移除订阅或更换 bootstrap 前，必须先备份 world 并仅清理此标签，保留应用包条目和版本约束，再卸载配置包、删除专用文件；否则后续 APK 操作会因缺失仓库标签而失败。切换通道后按安装步骤重新添加标签。生成的 `install.txt` 与 README 使用相同顺序。
 
 ## 故障
 

@@ -13,6 +13,7 @@ def main():
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parent.parent)
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("validate", help="validate all registered packages, including disabled ones")
+    commands.add_parser("check-updates", help="compare upstream releases with the published manifest")
     preview = commands.add_parser("plan", help="print a JSON plan; does not download, build or publish")
     preview.add_argument("--channel", choices=("stable", "prerelease"), default="stable")
     preview.add_argument("--include-disabled", action="store_true", help="also show candidate packages and blockers")
@@ -35,6 +36,9 @@ def main():
                 len(packages), sum(p["enabled"] for p in packages), len(repo["targets"])))
         elif args.command == "plan":
             print(json.dumps(plan(repo, packages, args.channel, args.include_disabled), indent=2))
+        elif args.command == "check-updates":
+            from .updates import check_updates
+            check_updates(args.root)
         elif args.command == "build":
             from .build import build
             build(args.root, args.apk.resolve(), args.output)
