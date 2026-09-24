@@ -6,7 +6,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 from apk_repository.config import ConfigError, load
-from apk_repository.publish import check_records, check_upstream_assets, child
+from apk_repository.publish import (
+    check_records,
+    check_upstream_assets,
+    child,
+    render_site,
+)
 from apk_repository.upstream import package_version, sha256
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -118,6 +123,54 @@ class PublishTests(unittest.TestCase):
             record["sha256"] = record["asset_sha256"] = sha256(self.site / record["file"])
             with self.assertRaisesRegex(ConfigError, "does not match GitHub"):
                 check_upstream_assets(self.packages, self.manifest, self.site)
+
+
+class RenderSiteTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.site = Path(self.temp.name).resolve()
+        self.repo = {"channels": ["stable", "latest"], "base_url": "https://example.invalid",
+                     "targets": [{"arch": "x86_64", "abi": "openwrt-25.12"},
+                                 {"arch": "aarch64_generic", "abi": "openwrt-25.12"}]}
+        self.manifest = {"key_sha256": "ab" * 32, "bootstrap": [], "packages": [
+            {"channel": "stable", "arch": "x86_64", "name": "sing-box", "version": "1.2.3-r0",
+             "file": "apk/stable/x86_64/sing-box-1.2.3-r0.apk",
+             "source_archive": "sources/sing-box/source.tar.gz"},
+            {"channel": "stable", "arch": "aarch64_generic", "name": "luci-app-sing-box", "version": "1.2.3-r0",
+             "file": "apk/stable/aarch64_generic/luci-app-sing-box-1.2.3-r0.apk",
+             "source_archive": "sources/luci-app-sing-box/source.tar.gz"},
+        ]}
+        render_site(self.repo, self.site, self.manifest)
+        self.page = (self.site / "index.html").read_text()
+
+    def test_packages_are_nested_under_channel_and_arch_folders(self):
+        stable = self.page.index(">stable</span>")
+        x86 = self.page.index(">x86_64</span>")
+        latest = self.page.index(">latest</span>")
+        package = self.page.index("sing-box-1.2.3-r0.apk")
+        self.assertTrue(self.page.count("<details") == self.page.count("</details>") == 6)
+        self.assertLess(stable, x86)
+        self.assertLess(package, latest)
+        self.assertIn('href="apk/stable/x86_64/packages.adb"', self.page)
+        self.assertIn('href="apk/latest/aarch64_generic/manifest.json"', self.page)
+        self.assertNotIn("<table", self.page)
+
+    def test_empty_folder_is_still_listed_with_its_feed(self):
+        self.assertIn("暂无软件包", self.page)
+        self.assertIn('href="apk/latest/x86_64/packages.adb"', self.page)
+
+    def test_folder_labels_and_links_are_escaped(self):
+        self.manifest["packages"].append({
+            "channel": "stable", "arch": "x86_64", "name": "<script>alert(1)</script>",
+            "version": "1-r0", "file": 'apk/a.apk" onmouseover="1',
+            "source_archive": "sources/a.tar.gz"})
+        render_site(self.repo, self.site, self.manifest)
+        page = (self.site / "index.html").read_text()
+        self.assertNotIn("<script>", page)
+        self.assertNotIn("<img", page)
+        self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", page)
+        self.assertIn("&quot;", page)
 
 
 if __name__ == "__main__":

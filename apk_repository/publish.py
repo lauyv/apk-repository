@@ -97,24 +97,60 @@ def bootstrap(apk, repo, site, work, channel, arch, version, license_path):
 
 
 def render_site(repo, site, manifest):
-    rows = []
-    for record in manifest["packages"]:
-        rows.append("<tr>" + "".join("<td>" + html.escape(str(record[key])) + "</td>"
-                    for key in ("channel", "arch", "name", "version"))
-                    + '<td><a href="{}">APK</a> · <a href="{}">源码</a></td></tr>'.format(
-                        html.escape(record["file"], quote=True), html.escape(record["source_archive"], quote=True)))
-    links = "".join('<li><a href="apk/{0}/{1}/packages.adb">{0} / {1}</a></li>'.format(c, t["arch"])
-                    for c in repo["channels"] for t in repo["targets"])
+    def escape(value, quote=False):
+        return html.escape(str(value), quote=quote)
+
+    def package_item(record):
+        return ('<li><span class="name">{}</span><code>{}</code>'
+                '<span class="links"><a href="{}">APK</a> · <a href="{}">源码</a></span></li>').format(
+                    escape(record["name"]), escape(record["version"]),
+                    escape(record["file"], quote=True), escape(record["source_archive"], quote=True))
+
+    def arch_folder(channel, target):
+        arch = target["arch"]
+        records = [record for record in manifest["packages"]
+                   if record["channel"] == channel and record["arch"] == arch]
+        feed = f"apk/{channel}/{arch}/"
+        items = "".join(package_item(record) for record in records) or '<li class="empty">暂无软件包</li>'
+        return ('<details class="folder"><summary><span class="dir">{arch}</span>'
+                '<span class="meta">{abi}</span><span class="count">{count} 个包</span></summary>'
+                '<div class="children">'
+                '<p class="feed"><a href="{feed}packages.adb">packages.adb</a> · '
+                '<a href="{feed}manifest.json">manifest.json</a></p>'
+                '<ul class="files">{items}</ul></div></details>').format(
+                    arch=escape(arch), abi=escape(target["abi"]), count=len(records), feed=feed, items=items)
+
+    folders = []
+    for channel in repo["channels"]:
+        archs = "".join(arch_folder(channel, target) for target in repo["targets"])
+        count = sum(1 for record in manifest["packages"] if record["channel"] == channel)
+        folders.append(f'<details class="folder" open><summary><span class="dir">{escape(channel)}</span>'
+                       f'<span class="count">{count} 个包</span></summary><div class="children">{archs}</div></details>')
     page = '''<!doctype html><html lang="zh-CN"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>apk-repository</title>
-<style>body{font:16px/1.6 system-ui,sans-serif;max-width:1000px;margin:48px auto;padding:0 24px;color:#18202b}table{border-collapse:collapse;width:100%}th,td{text-align:left;padding:10px;border-bottom:1px solid #ddd}code,pre{background:#f3f5f7;padding:4px;overflow:auto}a{color:#1859ac}</style>
+<style>
+body{font:16px/1.6 system-ui,sans-serif;max-width:1000px;margin:48px auto;padding:0 24px;color:#18202b}
+code{background:#f3f5f7;padding:2px 5px;border-radius:4px}a{color:#1859ac}
+h2{margin-top:32px}
+details.folder{margin:8px 0}
+details.folder>summary{cursor:pointer;padding:7px 10px;border-radius:6px;background:#eef1f5;font-weight:600}
+details.folder details.folder>summary{background:#f6f8fa;font-weight:500}
+summary .meta{margin-left:8px;font-weight:400;color:#5b6675;font-size:14px}
+summary .count{margin-left:8px;font-weight:400;color:#7a8492;font-size:14px}
+.children{margin-left:18px;border-left:1px solid #dde2e8;padding-left:14px}
+p.feed,p.empty{margin:8px 0;color:#5b6675;font-size:14px}
+ul.files{list-style:none;margin:0;padding:0}
+ul.files li{display:flex;flex-wrap:wrap;gap:10px;align-items:baseline;padding:7px 4px;border-bottom:1px solid #eef1f4}
+ul.files .name{flex:1 1 220px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;word-break:break-all}
+ul.files .links{white-space:nowrap}
+</style>
 <h1>apk-repository</h1><p>OpenWrt 25.12 APK 软件源。stable 和 latest 通道分别保留当前版本。</p>
 <p><a href="apk/apk-repository.pem">仓库公钥</a> · <a href="manifest.json">发布清单</a> · <a href="SHA256SUMS">SHA-256</a> · <a href="SHA256SUMS.sig">清单签名</a> · <a href="install.txt">安装说明</a></p>
-<p>公钥 SHA-256：<code>FINGERPRINT</code></p><ul>FEEDS</ul>
-<table><thead><tr><th>通道</th><th>架构</th><th>包</th><th>版本</th><th>下载</th></tr></thead><tbody>ROWS</tbody></table>
+<p>公钥 SHA-256：<code>FINGERPRINT</code></p>
+<h2>软件包目录</h2>TREE
 <p>软件包来自其声明的上游，保留原始内容与许可证，仅追加仓库签名。</p></html>
 '''
-    (site / "index.html").write_text(page.replace("FINGERPRINT", manifest["key_sha256"]).replace("FEEDS", links).replace("ROWS", "".join(rows)))
+    (site / "index.html").write_text(page.replace("FINGERPRINT", manifest["key_sha256"]).replace("TREE", "".join(folders)))
     (site / ".nojekyll").touch()
     sections = ["apk-repository\n仅适用于已列出的 OpenWrt APK v3 架构。保留设备官方软件源以解析依赖。\n",
                 "先从维护者或本次可信 Actions 日志确认公钥 SHA-256：" + manifest["key_sha256"] + "\n"]
