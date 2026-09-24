@@ -114,6 +114,10 @@ class ConfigTests(unittest.TestCase):
         self.packages[1]["architectures"]["x86_64"]["asset_pattern"] = "../{version}.tar.gz"
         self.reject("asset pattern")
 
+    def test_fixed_revision_rejects_placeholder(self):
+        self.packages[0]["revision"] = 4
+        self.reject("revision placeholder")
+
     def test_url_credentials_rejected(self):
         self.repo["base_url"] = "https://user:password@example.com/feed"
         self.reject("base_url")

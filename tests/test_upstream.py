@@ -9,6 +9,7 @@ from apk_repository.config import ConfigError
 from apk_repository.upstream import (
     api_json,
     download,
+    package_version,
     resolve_release,
     resolve_tag_commit,
     select_asset,
@@ -83,6 +84,25 @@ class UpstreamTests(unittest.TestCase):
         self.assertEqual(select_asset(release, "owner/tool", "tool_{version}_openwrt_x86_64.apk")["id"], 1)
         with self.assertRaises(ConfigError):
             select_asset(release, "owner/tool", "tool_{version}_linux_x86_64.apk")
+
+    def test_revision_placeholder_selects_one_asset_and_derives_version(self):
+        release = self.asset_release()
+        release["assets"][0]["name"] = "tool_1.2.3-r5.apk"
+        release["assets"][0]["browser_download_url"] = (
+            "https://github.com/owner/tool/releases/download/v1.2.3/tool_1.2.3-r5.apk")
+        pattern = "tool_{version}-r{revision}.apk"
+        asset = select_asset(release, "owner/tool", pattern)
+        self.assertEqual(package_version("v1.2.3", pattern, asset["name"], None), "1.2.3-r5")
+        release["assets"].append(dict(asset, name="tool_1.2.3-r4.apk"))
+        with self.assertRaisesRegex(ConfigError, "exactly one asset"):
+            select_asset(release, "owner/tool", pattern)
+
+    def test_revision_can_come_from_apk_metadata_without_filename_suffix(self):
+        pattern = "tool_{version}_openwrt_x86_64.apk"
+        name = "tool_1.2.3_openwrt_x86_64.apk"
+        self.assertEqual(package_version("v1.2.3", pattern, name, None, "1.2.3-r0"), "1.2.3-r0")
+        with self.assertRaisesRegex(ConfigError, "does not match Release tag"):
+            package_version("v1.2.3", pattern, name, None, "1.2.4-r0")
 
     def test_digest_and_provenance_are_required(self):
         release = self.asset_release()

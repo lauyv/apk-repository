@@ -8,9 +8,9 @@ import tarfile
 import tempfile
 from pathlib import Path, PurePosixPath
 
-from .apk import check_tool, index, validate_package
+from .apk import check_tool, index, metadata, validate_package
 from .config import load, require
-from .upstream import download, resolve_release, select_asset, sha256, version_parts
+from .upstream import download, package_version, resolve_release, select_asset, sha256
 
 
 def write_json(path, value):
@@ -69,8 +69,6 @@ def build(root, apk, output):
                 if key not in resolutions:
                     resolutions[key] = resolve_release(pkg["source"], channel)
                 release, commit = resolutions[key]
-                _, apk_version = version_parts(release["tag_name"])
-                version = apk_version + "-r" + str(pkg["revision"])
                 source_rel = "sources/{}/{}.tar.gz".format(pkg["name"], commit)
                 source_path = site / source_rel
                 if not source_path.exists():
@@ -85,6 +83,10 @@ def build(root, apk, output):
                     digest = asset["digest"].split(":", 1)[1]
                     asset_path = download(asset["browser_download_url"], work / "downloads" / digest,
                                           digest, asset["size"])
+                    observed = (metadata(apk, asset_path)["info"].get("version")
+                                if pkg["revision"] is None and "{revision}" not in mapping["asset_pattern"] else None)
+                    version = package_version(release["tag_name"], mapping["asset_pattern"],
+                                              asset["name"], pkg["revision"], observed)
                     feed = site / "apk" / channel / arch
                     feed.mkdir(parents=True, exist_ok=True)
                     destination = feed / (pkg["name"] + "-" + version + ".apk")

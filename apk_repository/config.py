@@ -89,7 +89,8 @@ def load(root):
         require(type(pkg["enabled"]) is bool and type(pkg["license_reviewed"]) is bool, name + ": flags must be boolean")
         require(matches(pkg["source"], r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+"), name + ": expected owner/repository")
         require(pkg["method"] == "sync-apk", name + ": only upstream APK synchronization is supported")
-        require(type(pkg["revision"]) is int and pkg["revision"] >= 0, name + ": revision must be nonnegative")
+        require(pkg["revision"] is None or (type(pkg["revision"]) is int and pkg["revision"] >= 0),
+                name + ": revision must be nonnegative or null")
         require(isinstance(pkg["license"], str) and pkg["license"], name + ": license required")
         string_list(pkg["channels"], name + ": channels", repo["channels"])
         require(pkg["channels"], name + ": at least one channel required")
@@ -102,9 +103,12 @@ def load(root):
             fields(mapping, "asset_pattern package_arch", name + ": " + arch)
             require(mapping["package_arch"] in (arch, "noarch"), name + ": incompatible package architecture")
             pattern = mapping["asset_pattern"]
-            require(pattern is None or (isinstance(pattern, str) and pattern.endswith(".apk") and "{version}" in pattern
-                    and matches(pattern.replace("{version}", "1.0.0"), r"[A-Za-z0-9][A-Za-z0-9_.+-]*")),
-                    name + ": asset pattern must be a filename with {version}")
+            require(pattern is None or (isinstance(pattern, str) and pattern.endswith(".apk")
+                    and pattern.count("{version}") == 1
+                    and pattern.count("{revision}") <= (1 if pkg["revision"] is None else 0)
+                    and matches(pattern.replace("{version}", "1.0.0").replace("{revision}", "1"),
+                                r"[A-Za-z0-9][A-Za-z0-9_.+-]*")),
+                    name + ": asset pattern must be a filename with {version} and a compatible revision placeholder")
         if pkg["enabled"]:
             require(pkg["license_reviewed"], name + ": license review required before enabling")
             require(all(m["asset_pattern"] for m in mappings.values()), name + ": asset pattern required before enabling")

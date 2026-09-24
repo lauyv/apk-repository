@@ -5,10 +5,10 @@ import os
 import urllib.error
 
 from .config import load, require
-from .upstream import open_url, resolve_release, select_asset, version_parts
+from .upstream import open_url, resolve_release, select_asset
 
-FIELDS = ("channel", "arch", "name", "version", "source", "source_commit",
-          "release_id", "release_tag", "upstream_prerelease", "asset_id", "asset_sha256")
+FIELDS = ("channel", "arch", "name", "source", "source_commit",
+          "release_id", "release_tag", "upstream_prerelease", "asset_id", "asset_name", "asset_sha256")
 
 
 def identities(records):
@@ -38,17 +38,18 @@ def check_updates(root):
             if key not in resolutions:
                 resolutions[key] = resolve_release(pkg["source"], channel)
             release, commit = resolutions[key]
-            _, version = version_parts(release["tag_name"])
             for target in repo["targets"]:
                 arch = target["arch"]
                 if arch not in pkg["architectures"]:
                     continue
-                asset = select_asset(release, pkg["source"], pkg["architectures"][arch]["asset_pattern"])
+                pattern = pkg["architectures"][arch]["asset_pattern"]
+                asset = select_asset(release, pkg["source"], pattern)
                 records.append({"channel": channel, "arch": arch, "name": pkg["name"],
-                    "version": version + "-r" + str(pkg["revision"]), "source": pkg["source"],
+                    "source": pkg["source"],
                     "source_commit": commit, "release_id": release["id"],
                     "release_tag": release["tag_name"], "upstream_prerelease": release["prerelease"],
-                    "asset_id": asset["id"], "asset_sha256": asset["digest"].split(":", 1)[1]})
+                    "asset_id": asset["id"], "asset_name": asset["name"],
+                    "asset_sha256": asset["digest"].split(":", 1)[1]})
     require(records, "no enabled packages")
     changed = current is None or identities(records) != identities(current["packages"])
     message = "Upstream changes detected; publication required." if changed else "No upstream changes; publication skipped."

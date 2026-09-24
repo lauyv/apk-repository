@@ -25,6 +25,28 @@ def version_parts(tag):
     return upstream, apk
 
 
+def package_version(tag, pattern, asset_name, revision, observed_version=None):
+    upstream, apk = version_parts(tag)
+    expected = pattern.replace("{version}", upstream)
+    if revision is None:
+        if "{revision}" in expected:
+            expression = re.escape(expected).replace(r"\{revision\}", r"(0|[1-9][0-9]*)")
+            match = re.fullmatch(expression, asset_name)
+            require(match is not None, "asset name does not match configured revision pattern")
+            revision = int(match.group(1))
+        else:
+            require(asset_name == expected, "asset name does not match configured pattern")
+            require(isinstance(observed_version, str)
+                    and re.fullmatch(re.escape(apk) + r"-r(0|[1-9][0-9]*)", observed_version),
+                    "APK metadata version does not match Release tag")
+            return observed_version
+    else:
+        require(asset_name == expected, "asset name does not match configured pattern")
+    result = apk + "-r" + str(revision)
+    require(observed_version is None or observed_version == result, "APK metadata version mismatch")
+    return result
+
+
 def sha256(path):
     digest = hashlib.sha256()
     with Path(path).open("rb") as source:
@@ -156,13 +178,14 @@ def resolve_release(source, channel, tag=None):
 def select_asset(release, source, pattern):
     version, _ = version_parts(release["tag_name"])
     expected = pattern.replace("{version}", version)
-    assets = [a for a in release["assets"] if a["name"] == expected]
-    require(len(assets) == 1, "Release must contain exactly one asset named " + expected)
+    expression = re.escape(expected).replace(r"\{revision\}", r"(0|[1-9][0-9]*)")
+    assets = [a for a in release["assets"] if re.fullmatch(expression, a["name"])]
+    require(len(assets) == 1, "Release must contain exactly one asset matching " + expected)
     asset = assets[0]
     require(re.fullmatch(r"sha256:[0-9a-f]{64}", asset.get("digest") or ""), "asset has no GitHub SHA-256 digest")
     require(type(asset["size"]) is int and 0 < asset["size"] <= MAX_DOWNLOAD, "invalid asset size")
     url = urllib.parse.urlsplit(asset["browser_download_url"])
     require(url.scheme == "https" and url.hostname == "github.com"
-            and urllib.parse.unquote(url.path) == "/{}/releases/download/{}/{}".format(source, release["tag_name"], expected),
+            and urllib.parse.unquote(url.path) == "/{}/releases/download/{}/{}".format(source, release["tag_name"], asset["name"]),
             "asset URL does not belong to the configured repository and Release")
     return asset

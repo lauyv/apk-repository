@@ -20,7 +20,9 @@ class UpdateTests(unittest.TestCase):
         with (
             patch.dict("os.environ", {}, clear=True),
             patch("apk_repository.updates.resolve_release", side_effect=release),
-            patch("apk_repository.updates.select_asset", return_value={"id": 2, "digest": "sha256:" + digest}),
+            patch("apk_repository.updates.select_asset", side_effect=lambda release, source, pattern: {
+                "id": 2, "name": pattern.replace("{version}", "1.0.0").replace("{revision}", "4"),
+                "digest": "sha256:" + digest}),
             patch("apk_repository.updates.open_url", side_effect=error,
                   return_value=io.BytesIO(json.dumps(published).encode())),
         ):
@@ -32,10 +34,12 @@ class UpdateTests(unittest.TestCase):
         for channel, target, pkg in itertools.product(repo["channels"], repo["targets"], packages):
             arch = target["arch"]
             if pkg["enabled"] and channel in pkg["channels"] and arch in pkg["architectures"]:
+                pattern = pkg["architectures"][arch]["asset_pattern"]
                 records.append({"channel": channel, "arch": arch, "name": pkg["name"],
-                    "version": f"1.0.0-r{pkg['revision']}", "source": pkg["source"],
+                    "source": pkg["source"],
                     "source_commit": "b" * 40, "release_id": 1, "release_tag": "v1.0.0",
                     "upstream_prerelease": False, "asset_id": 2,
+                    "asset_name": pattern.replace("{version}", "1.0.0").replace("{revision}", "4"),
                     "asset_sha256": "a" * 64})
         return {"schema_version": 1, "packages": records}
 
@@ -44,6 +48,11 @@ class UpdateTests(unittest.TestCase):
 
     def test_replaced_asset_requires_publication(self):
         self.assertTrue(self.check(self.manifest(), digest="c" * 64))
+
+    def test_renamed_asset_requires_publication(self):
+        published = self.manifest()
+        published["packages"][0]["asset_name"] = "old-name.apk"
+        self.assertTrue(self.check(published))
 
     def test_new_architecture_requires_publication(self):
         published = self.manifest()

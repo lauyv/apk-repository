@@ -3,7 +3,8 @@ name: Publish APK repository
 on:
   workflow_dispatch:
   schedule:
-    - cron: '23 4 * * *'
+    - cron: '0 4 * * *'
+      timezone: 'Asia/Shanghai'
 
 permissions:
   contents: read

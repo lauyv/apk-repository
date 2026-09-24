@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from apk_repository.config import ConfigError, load
 from apk_repository.publish import check_records, check_upstream_assets, child
-from apk_repository.upstream import sha256
+from apk_repository.upstream import package_version, sha256
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -24,7 +24,12 @@ class PublishTests(unittest.TestCase):
             prerelease = channel != "stable"
             for pkg, target in itertools.product(self.packages, self.repo["targets"]):
                 arch = target["arch"]
-                version = ("1.3.0_beta1" if prerelease else "1.2.3") + "-r" + str(pkg["revision"])
+                tag = "v1.3.0-beta.1" if prerelease else "v1.2.3"
+                pattern = pkg["architectures"][arch]["asset_pattern"]
+                revision = 5 if prerelease else 4
+                asset_name = pattern.replace("{version}", tag.removeprefix("v")).replace("{revision}", str(revision))
+                observed = ("1.3.0_beta1-r0" if prerelease else "1.2.3-r0") if pkg["name"] == "sing-box" else None
+                version = package_version(tag, pattern, asset_name, pkg["revision"], observed)
                 relative = "apk/{}/{}/{}-{}.apk".format(channel, arch, pkg["name"], version)
                 path = self.site / relative
                 path.parent.mkdir(parents=True, exist_ok=True)
@@ -34,10 +39,10 @@ class PublishTests(unittest.TestCase):
                 source.parent.mkdir(parents=True, exist_ok=True)
                 source.write_bytes(b"fixture source")
                 self.manifest["packages"].append({"name": pkg["name"], "channel": channel, "arch": arch,
-                    "abi": "openwrt-25.12", "source": pkg["source"], "release_tag": "v1.3.0-beta.1" if prerelease else "v1.2.3",
+                    "abi": "openwrt-25.12", "source": pkg["source"], "release_tag": tag,
                     "upstream_prerelease": prerelease, "version": version, "file": relative,
                     "source_archive": source_rel, "source_sha256": sha256(source),
-                    "asset_sha256": sha256(path), "sha256": sha256(path)})
+                    "asset_name": asset_name, "asset_sha256": sha256(path), "sha256": sha256(path)})
 
     def check(self):
         with patch("apk_repository.publish.validate_package"):
@@ -51,8 +56,11 @@ class PublishTests(unittest.TestCase):
         for record in self.manifest["packages"]:
             if record["channel"] == "latest":
                 record["release_tag"] = "v1.2.3"
-                record["version"] = "1.2.3-r" + str(next(
-                    pkg["revision"] for pkg in self.packages if pkg["name"] == record["name"]))
+                pkg = next(pkg for pkg in self.packages if pkg["name"] == record["name"])
+                pattern = pkg["architectures"][record["arch"]]["asset_pattern"]
+                record["asset_name"] = pattern.replace("{version}", "1.2.3").replace("{revision}", "4")
+                observed = "1.2.3-r0" if pkg["name"] == "sing-box" else None
+                record["version"] = package_version("v1.2.3", pattern, record["asset_name"], pkg["revision"], observed)
                 record["upstream_prerelease"] = False
                 record["file"] = "apk/{}/{}/{}-{}.apk".format(
                     record["channel"], record["arch"], record["name"], record["version"])
@@ -98,11 +106,10 @@ class PublishTests(unittest.TestCase):
 
     def test_signer_rechecks_asset_digest_independently(self):
         record = self.manifest["packages"][0]
-        record.update(release_id=7, source_commit="a" * 40, asset_id=9,
-                      asset_name="upstream.apk")
+        record.update(release_id=7, source_commit="a" * 40, asset_id=9)
         self.manifest["packages"] = [record]
         release = {"id": 7, "prerelease": record["upstream_prerelease"]}
-        asset = {"id": 9, "name": "upstream.apk", "digest": "sha256:" + record["asset_sha256"]}
+        asset = {"id": 9, "name": record["asset_name"], "digest": "sha256:" + record["asset_sha256"]}
         with (patch("apk_repository.publish.resolve_release", return_value=(release, "a" * 40)) as resolved,
               patch("apk_repository.publish.select_asset", return_value=asset)):
             check_upstream_assets(self.packages, self.manifest, self.site)

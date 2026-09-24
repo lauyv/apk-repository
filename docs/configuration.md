@@ -50,13 +50,13 @@ APK Tools 使用 `3.0.5`、提交 `b5a31c0d865342ad80be10d68f1bb3d3ad9b0866`，�
 | `method` | 当前只接受 `sync-apk` |
 | `channels` | 参与的通道 |
 | `license`、`license_reviewed` | 上游许可证标识和接入审核声明；源码及许可证文件或上游 Makefile 中的许可证声明随发布保留 |
-| `revision` | 预期上游 APK 的 `-rN`，不是本仓库重新打包次数 |
+| `revision` | 固定的上游 APK `-rN`；设为 `null` 时，从资产文件名或下载后 APK 元数据读取修订号，不是本仓库重新打包次数 |
 | `dependencies`、`conflicts` | 预期 APK 元数据，逐项精确校验 |
 | `architectures` | 精确架构到 `asset_pattern`、`package_arch` 的映射 |
 
 版本示例：Release `v1.14.0-beta.8` 对应上游资产版本 `1.14.0-beta.8`，APK 版本为 `1.14.0_beta8-r0`。只接受数字版本和 alpha/beta/rc 后缀，不猜测未知版本格式。
 
-`asset_pattern` 必须含 `{version}`，根据实际 Release API 资产列表精确匹配；不通过模板构造下载地址。sing-box 只选 `openwrt` 命名的资产。架构无关的 LuCI 包可为 `noarch`，索引仍按设备架构分别发布。
+`asset_pattern` 必须含 `{version}`，根据实际 Release API 资产列表匹配；不通过模板构造下载地址。`revision` 为 `null` 且资产名带 `-rN` 时，可使用 `{revision}`，只接受唯一匹配的非负整数修订号；资产名不带修订号时，从 APK 元数据读取，并要求版本与 Release 标签一致。所有包均校验包内完整版本。sing-box 只选 `openwrt` 命名的资产。架构无关的 LuCI 包可为 `noarch`，索引仍按设备架构分别发布。
 
 `stable` 使用 GitHub 的 latest Release API 选择正式版。`latest` 遍历完整 Release 列表，按发布时间选择最新非草稿记录，不区分正式版和预发布版。API 分页读取，摘要缺失、元数据变化、资产缺失均阻止发布。
 

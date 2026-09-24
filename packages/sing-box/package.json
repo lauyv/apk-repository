@@ -7,7 +7,7 @@
   "channels": ["stable", "latest"],
   "license": "GPL-3.0-or-later",
   "license_reviewed": true,
-  "revision": 0,
+  "revision": null,
   "dependencies": ["ca-bundle", "kmod-inet-diag", "kmod-tun", "firewall4", "kmod-nft-queue"],
   "conflicts": [],
   "architectures": {

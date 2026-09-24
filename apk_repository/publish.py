@@ -10,7 +10,7 @@ from pathlib import Path, PurePosixPath
 from .apk import check_tool, index, make_package, metadata, run, validate_package
 from .build import write_json
 from .config import load, read_json, require
-from .upstream import resolve_release, select_asset, sha256, version_parts
+from .upstream import package_version, resolve_release, select_asset, sha256
 
 
 def child(root, relative):
@@ -34,8 +34,10 @@ def check_records(repo, packages, manifest, site, apk, keys=None):
         seen.add(identity)
         pkg, target = expected[identity]
         require(record["source"] == pkg["source"] and record["abi"] == target["abi"], "wrong package provenance")
-        _, version = version_parts(record["release_tag"])
-        require(record["version"] == version + "-r" + str(pkg["revision"]), "wrong APK version")
+        pattern = pkg["architectures"][record["arch"]]["asset_pattern"]
+        version = package_version(record["release_tag"], pattern, record["asset_name"],
+                                  pkg["revision"], record["version"])
+        require(record["version"] == version, "wrong APK version")
         if record["channel"] == "stable":
             require(not record["upstream_prerelease"], "prerelease package in stable feed")
         expected_file = "apk/{}/{}/{}-{}.apk".format(*identity[:2], record["name"], record["version"])
