@@ -37,8 +37,7 @@ class ConfigTests(unittest.TestCase):
             load(self.root)
 
     def test_default_plan_never_includes_disabled_packages(self):
-        repo, packages = load(self.root)
-        self.assertEqual(plan(repo, packages, "stable")["jobs"], [])
+        self.assertEqual(plan(self.repo, self.packages, "stable")["jobs"], [])
 
     def test_candidate_plan_exposes_blockers_and_generic_feed_url(self):
         result = plan(self.repo, self.packages, "latest", True)
@@ -52,10 +51,12 @@ class ConfigTests(unittest.TestCase):
     def test_new_package_needs_no_planner_changes(self):
         pkg = copy.deepcopy(self.packages[1])
         pkg.update(name="example-tool", source="example/tool", enabled=True, license_reviewed=True,
-                   channels=["stable"])
+                   channels=["stable", "latest"])
         pkg["architectures"] = {"x86_64": pkg["architectures"]["x86_64"]}
         pkg["architectures"]["x86_64"].update(asset_pattern="tool-{version}-x86_64.apk")
-        self.repo["targets"][0]["abi"] = "test-abi"
+        self.repo["targets"] = [{"arch": "x86_64", "abi": "test-abi"}]
+        for configured in self.packages:
+            configured["architectures"] = {"x86_64": configured["architectures"]["x86_64"]}
         self.repo["packages"].append(pkg["name"])
         self.packages.append(pkg)
         self.save()
@@ -63,7 +64,13 @@ class ConfigTests(unittest.TestCase):
         jobs = plan(repo, packages, "stable")["jobs"]
         self.assertEqual([j["package"] for j in jobs], ["example-tool"])
         self.assertEqual(jobs[0]["blockers"], [])
-        self.assertEqual(plan(repo, packages, "latest")["jobs"], [])
+        self.assertEqual(len(plan(repo, packages, "latest")["jobs"]), 1)
+
+    def test_empty_channel_architecture_feed_is_rejected(self):
+        self.packages[0].update(enabled=True, license_reviewed=True, channels=["stable"])
+        for target in self.repo["targets"]:
+            target["abi"] = "openwrt-25.12"
+        self.reject("empty feed: latest/")
 
     def test_path_traversal(self):
         self.repo["packages"] = ["../outside"]

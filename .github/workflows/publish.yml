@@ -90,6 +90,7 @@ jobs:
       - name: Sign packages and indexes
         env:
           APK_SIGNING_KEY: ${{ secrets.APK_SIGNING_KEY }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           test -n "$APK_SIGNING_KEY" || { echo 'Set APK_SIGNING_KEY in the repository-signing environment.' >&2; exit 1; }
           umask 077

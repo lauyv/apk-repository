@@ -110,6 +110,11 @@ def load(root):
             require(all(m["asset_pattern"] for m in mappings.values()), name + ": asset pattern required before enabling")
             require(all(t["abi"] is not None for t in repo["targets"] if t["arch"] in mappings), name + ": target ABI required before enabling")
         packages.append(pkg)
+    for channel in repo["channels"]:
+        for target in repo["targets"]:
+            arch = target["arch"]
+            require(any(pkg["enabled"] and channel in pkg["channels"] and arch in pkg["architectures"]
+                        for pkg in packages), f"empty feed: {channel}/{arch}")
     return repo, packages
 
 

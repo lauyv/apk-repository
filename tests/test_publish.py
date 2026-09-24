@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from apk_repository.config import ConfigError, load
-from apk_repository.publish import check_records, child
+from apk_repository.publish import check_records, check_upstream_assets, child
 from apk_repository.upstream import sha256
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -95,6 +95,22 @@ class PublishTests(unittest.TestCase):
     def test_artifact_path_traversal_rejected(self):
         with self.assertRaises(ConfigError):
             child(self.site, "../outside")
+
+    def test_signer_rechecks_asset_digest_independently(self):
+        record = self.manifest["packages"][0]
+        record.update(release_id=7, source_commit="a" * 40, asset_id=9,
+                      asset_name="upstream.apk")
+        self.manifest["packages"] = [record]
+        release = {"id": 7, "prerelease": record["upstream_prerelease"]}
+        asset = {"id": 9, "name": "upstream.apk", "digest": "sha256:" + record["asset_sha256"]}
+        with (patch("apk_repository.publish.resolve_release", return_value=(release, "a" * 40)) as resolved,
+              patch("apk_repository.publish.select_asset", return_value=asset)):
+            check_upstream_assets(self.packages, self.manifest, self.site)
+            resolved.assert_called_once_with(record["source"], record["channel"], record["release_tag"])
+            (self.site / record["file"]).write_bytes(b"tampered APK")
+            record["sha256"] = record["asset_sha256"] = sha256(self.site / record["file"])
+            with self.assertRaisesRegex(ConfigError, "does not match GitHub"):
+                check_upstream_assets(self.packages, self.manifest, self.site)
 
 
 if __name__ == "__main__":

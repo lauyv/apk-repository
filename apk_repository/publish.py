@@ -10,7 +10,7 @@ from pathlib import Path, PurePosixPath
 from .apk import check_tool, index, make_package, metadata, run, validate_package
 from .build import write_json
 from .config import load, read_json, require
-from .upstream import sha256, version_parts
+from .upstream import resolve_release, select_asset, sha256, version_parts
 
 
 def child(root, relative):
@@ -48,6 +48,28 @@ def check_records(repo, packages, manifest, site, apk, keys=None):
         validate_package(apk, path, pkg, record["version"], pkg["architectures"][record["arch"]]["package_arch"], keys)
     require(seen == set(expected), "manifest is missing configured packages")
     return seen
+
+
+def check_upstream_assets(packages, manifest, site):
+    """Recheck unsigned APKs against GitHub, independently of the build manifest."""
+    configured = {pkg["name"]: pkg for pkg in packages}
+    releases = {}
+    for record in manifest["packages"]:
+        pkg = configured[record["name"]]
+        key = (pkg["source"], record["channel"], record["release_tag"])
+        if key not in releases:
+            releases[key] = resolve_release(*key)
+        release, commit = releases[key]
+        require(record["release_id"] == release["id"]
+                and record["source_commit"] == commit
+                and record["upstream_prerelease"] == release["prerelease"],
+                "upstream Release changed since build")
+        pattern = pkg["architectures"][record["arch"]]["asset_pattern"]
+        asset = select_asset(release, pkg["source"], pattern)
+        digest = asset["digest"].split(":", 1)[1]
+        require(record["asset_id"] == asset["id"] and record["asset_name"] == asset["name"]
+                and record["asset_sha256"] == digest and sha256(child(site, record["file"])) == digest,
+                "upstream APK does not match GitHub Release asset")
 
 
 def bootstrap(apk, repo, site, work, channel, arch, version, license_path):
@@ -145,6 +167,7 @@ def sign(root, apk, unsigned, output, private_key):
     require(all(not p.is_symlink() for p in unsigned.rglob("*")), "symlinks in build artifacts")
     original = read_json(unsigned / "manifest.json")
     check_records(repo, packages, original, unsigned, apk)
+    check_upstream_assets(packages, original, unsigned)
     expected_apks = {record["file"] for record in original["packages"]}
     require({p.relative_to(unsigned).as_posix() for p in unsigned.rglob("*.apk")} == expected_apks, "unlisted APK in build artifacts")
     output.parent.mkdir(parents=True, exist_ok=True)
