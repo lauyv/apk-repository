@@ -20,11 +20,13 @@ def main():
     assemble = commands.add_parser("build", help="download and validate APKs for all configured channels")
     assemble.add_argument("--apk", required=True, type=Path)
     assemble.add_argument("--output", required=True, type=Path)
+    assemble.add_argument("--cache", type=Path, help="reuse SHA-256-verified upstream APK downloads")
     signing = commands.add_parser("sign", help="sign a complete build and produce the Pages site")
     signing.add_argument("--apk", required=True, type=Path)
     signing.add_argument("--input", required=True, type=Path)
     signing.add_argument("--output", required=True, type=Path)
     signing.add_argument("--key", required=True, type=Path)
+    signing.add_argument("--previous", type=Path, help="reuse compatible authenticated signed APKs")
     verification = commands.add_parser("verify", help="verify site signatures, checksums and indexes")
     verification.add_argument("--apk", required=True, type=Path)
     verification.add_argument("--site", required=True, type=Path)
@@ -41,10 +43,10 @@ def main():
             check_updates(args.root)
         elif args.command == "build":
             from .build import build
-            build(args.root, args.apk.resolve(), args.output)
+            build(args.root, args.apk.resolve(), args.output, args.cache)
         elif args.command == "sign":
             from .publish import sign
-            sign(args.root, args.apk.resolve(), args.input, args.output, args.key)
+            sign(args.root, args.apk.resolve(), args.input, args.output, args.key, args.previous)
         elif args.command == "verify":
             from .publish import verify
             verify(args.root, args.apk.resolve(), args.site)

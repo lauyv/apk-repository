@@ -10,6 +10,7 @@ from pathlib import Path, PurePosixPath
 from .apk import check_tool, index, make_package, metadata, run, validate_package
 from .build import write_json
 from .config import load, read_json, require
+from .reuse import fingerprint, previous_records, reuse_apk
 from .upstream import package_version, resolve_release, select_asset, sha256
 
 
@@ -195,7 +196,7 @@ apk add -u {selected}
     (site / "install.txt").write_text("".join(sections))
 
 
-def sign(root, apk, unsigned, output, private_key):
+def sign(root, apk, unsigned, output, private_key, previous=None):
     repo, packages = load(root)
     check_tool(apk, repo["apk_tools"]["version"])
     unsigned, output, private_key = Path(unsigned).resolve(), Path(output).resolve(), Path(private_key).resolve()
@@ -225,6 +226,9 @@ def sign(root, apk, unsigned, output, private_key):
         keys = work / "keys"
         keys.mkdir()
         shutil.copyfile(public, keys / public.name)
+        cached_records = previous_records(previous, public, repo)
+        package_by_name = {p["name"]: p for p in packages}
+        target_by_arch = {t["arch"]: t for t in repo["targets"]}
         manifest = original
         manifest["key_sha256"] = sha256(public)
         manifest["bootstrap"] = []
@@ -232,8 +236,17 @@ def sign(root, apk, unsigned, output, private_key):
         for channel in repo["channels"]:
             for target in repo["targets"]:
                 manifest["bootstrap"].append(bootstrap(apk, repo, site, work, channel, target["arch"], version, Path(root) / "LICENSE"))
+        reused = 0
         for record in manifest["packages"] + manifest["bootstrap"]:
             path = child(site, record["file"])
+            if record in manifest["packages"]:
+                package = package_by_name[record["name"]]
+                record["reuse_fingerprint"] = fingerprint(repo, package, target_by_arch[record["arch"]])
+                if reuse_apk(apk, previous, cached_records, record, path, package, keys):
+                    record["sha256"] = sha256(path)
+                    reused += 1
+                    print("Reused signed APK: " + record["file"])
+                    continue
             before = metadata(apk, path)
             run([apk, "adbsign", "--allow-untrusted", "--sign-key", private_key, path])
             require(metadata(apk, path) == before, "signing changed package metadata")
@@ -256,6 +269,7 @@ def sign(root, apk, unsigned, output, private_key):
                                          for p in sorted(site.rglob("*")) if p.is_file()))
         run(["openssl", "dgst", "-sha256", "-sign", private_key, "-out", site / "SHA256SUMS.sig", checksum_file])
         site.rename(output)
+    print(f"Signed APK reuse: {reused}/{len(manifest['packages'])} upstream packages")
     print("Public key SHA-256: " + manifest["key_sha256"])
 
 

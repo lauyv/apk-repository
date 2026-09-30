@@ -2,6 +2,11 @@ name: Publish APK repository
 
 on:
   workflow_dispatch:
+    inputs:
+      check_installation:
+        description: 'Run OpenWrt installation and upgrade checks for both architectures'
+        type: boolean
+        default: false
   schedule:
     - cron: '0 4 * * *'
       timezone: 'Asia/Shanghai'
@@ -57,6 +62,12 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-toolchain
+      - name: Cache verified upstream APK downloads
+        uses: actions/cache@v6.1.0
+        with:
+          path: build/cache/upstream-apks
+          key: upstream-apks-v2-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: upstream-apks-v2-
       - name: Validate configuration and run tests
         run: |
           uv run --locked python -m apk_repository validate
@@ -65,7 +76,7 @@ jobs:
       - name: Synchronize APKs for all channels
         env:
           GH_TOKEN: ${{ github.token }}
-        run: uv run --locked python -m apk_repository build --apk "$TOOLS_DIR/apk" --output build/unsigned
+        run: uv run --locked python -m apk_repository build --apk "$TOOLS_DIR/apk" --output build/unsigned --cache build/cache/upstream-apks
       - uses: actions/upload-artifact@v7.0.1
         with:
           name: unsigned-repository
@@ -84,6 +95,12 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-toolchain
+      - name: Restore previous signed repository
+        uses: actions/cache@v6.1.0
+        with:
+          path: build/cache/signed
+          key: signed-apks-v1-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: signed-apks-v1-
       - uses: actions/download-artifact@v8.0.1
         with:
           name: unsigned-repository
@@ -100,9 +117,12 @@ jobs:
           printf '%s\n' "$APK_SIGNING_KEY" > "$key_file"
           unset APK_SIGNING_KEY
           umask 022
-          fakeroot uv run --locked python -m apk_repository sign --apk "$TOOLS_DIR/apk" --input build/unsigned --output build/public --key "$key_file"
+          fakeroot uv run --locked python -m apk_repository sign --apk "$TOOLS_DIR/apk" --input build/unsigned --output build/public --key "$key_file" --previous build/cache/signed
           uv run --locked python -m apk_repository verify --apk "$TOOLS_DIR/apk" --site build/public
           uv run --locked python -c 'import json; d=json.load(open("build/public/manifest.json")); print("Public key SHA-256: `" + d["key_sha256"] + "`")' >> "$GITHUB_STEP_SUMMARY"
+      - name: Prepare verified signed APK cache for the next run
+        run: |
+          uv run --locked python -c 'import shutil; from pathlib import Path; p=Path("build/cache/signed"); shutil.rmtree(p, ignore_errors=True); shutil.copytree("build/public", p)'
       - uses: actions/upload-artifact@v7.0.1
         with:
           name: signed-repository
@@ -134,6 +154,7 @@ jobs:
 
   check-installation:
     needs: sign
+    if: github.event_name == 'workflow_dispatch' && inputs.check_installation
     strategy:
       fail-fast: false
       matrix:
@@ -167,6 +188,11 @@ jobs:
 
   deploy:
     needs: [verify, check-installation]
+    if: >-
+      ${{ !cancelled() && needs.verify.result == 'success' &&
+          (needs.check-installation.result == 'success' ||
+           (needs.check-installation.result == 'skipped' &&
+            !(github.event_name == 'workflow_dispatch' && inputs.check_installation))) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:

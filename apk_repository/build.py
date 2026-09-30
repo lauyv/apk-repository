@@ -3,6 +3,7 @@
 import datetime
 import json
 import os
+import re
 import shutil
 import tarfile
 import tempfile
@@ -10,6 +11,7 @@ from pathlib import Path, PurePosixPath
 
 from .apk import check_tool, index, metadata, validate_package
 from .config import load, require
+from .reuse import fingerprint
 from .upstream import download, package_version, resolve_release, select_asset, sha256
 
 
@@ -46,7 +48,7 @@ def source_license(archive, declared_license):
                 + "License text: https://spdx.org/licenses/" + declared_license + ".html\n").encode("utf-8")
 
 
-def build(root, apk, output):
+def build(root, apk, output, cache=None):
     root, output = Path(root).resolve(), Path(output).resolve()
     repo, packages = load(root)
     check_tool(apk, repo["apk_tools"]["version"])
@@ -54,6 +56,12 @@ def build(root, apk, output):
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="apk-build-", dir=output.parent) as temporary:
         work = Path(temporary)
+        cache_root = Path(cache).resolve() if cache else work
+        downloads = cache_root / "apk-repository-downloads-v1"
+        require(downloads.resolve() == downloads and not downloads.is_symlink(),
+                "download cache directory must not be a link")
+        downloads.mkdir(parents=True, exist_ok=True)
+        used_downloads = set()
         site = work / "site"
         site.mkdir()
         manifest = {"schema_version": 1, "generated_at": datetime.datetime.now(datetime.UTC).isoformat(),
@@ -81,7 +89,8 @@ def build(root, apk, output):
                     mapping = pkg["architectures"][arch]
                     asset = select_asset(release, pkg["source"], mapping["asset_pattern"])
                     digest = asset["digest"].split(":", 1)[1]
-                    asset_path = download(asset["browser_download_url"], work / "downloads" / digest,
+                    used_downloads.add(digest)
+                    asset_path = download(asset["browser_download_url"], downloads / digest,
                                           digest, asset["size"])
                     observed = (metadata(apk, asset_path)["info"].get("version")
                                 if pkg["revision"] is None and "{revision}" not in mapping["asset_pattern"] else None)
@@ -100,6 +109,7 @@ def build(root, apk, output):
                         "release_id": release["id"], "release_tag": release["tag_name"],
                         "upstream_prerelease": release["prerelease"], "asset_id": asset["id"],
                         "asset_name": asset["name"], "asset_sha256": digest, "sha256": sha256(destination),
+                        "reuse_fingerprint": fingerprint(repo, pkg, target),
                     })
             for target in repo["targets"]:
                 index(apk, site / "apk" / channel / target["arch"])
@@ -107,3 +117,8 @@ def build(root, apk, output):
         write_json(site / "manifest.json", manifest)
         # Publish only a complete fresh tree. No old APKs or source archives are carried forward.
         site.rename(output)
+        # Only prune digest-named entries in our own namespace, never the cache root.
+        for path in downloads.iterdir():
+            if (re.fullmatch(r"[0-9a-f]{64}", path.name) and not path.is_symlink()
+                    and path.is_file() and path.name not in used_downloads):
+                path.unlink()

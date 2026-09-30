@@ -14,15 +14,20 @@ uv run --locked python -m apk_repository plan --channel latest
 uv run --locked python -m unittest discover -s tests -v
 
 # 需要固定版本的 APK Tools；输出目录必须尚不存在
-uv run --locked python -m apk_repository build --apk build/tools/apk --output build/unsigned
+uv run --locked python -m apk_repository build --apk build/tools/apk --output build/unsigned --cache build/cache/upstream-apks
 
 # 只为 bootstrap 构造新包；上游 APK 仅追加签名
 fakeroot uv run --locked python -m apk_repository sign \
-  --apk build/tools/apk --input build/unsigned --output build/public --key /secure/signing.key
+  --apk build/tools/apk --input build/unsigned --output build/public --key /secure/signing.key \
+  --previous build/cache/signed
 uv run --locked python -m apk_repository verify --apk build/tools/apk --site build/public
 ```
 
 命令失败返回非零退出码。`plan` 只展示计划，`build` 下载真实资产但不使用生产密钥，`sign` 生成完整站点，`verify` 检查站点完整性和签名。`--root <path>` 是子命令之前的全局选项。
+
+`build --cache` 可选，在指定目录的专属子目录 `apk-repository-downloads-v1/` 中按上游 SHA-256 复用原始 APK，仍检查摘要、大小和包元数据；只清理该子目录内不再使用的 SHA-256 文件，不清理指定目录中的其他文件。`sign --previous` 可选，读取上次经过验证的签名站点，认证清单并逐包校验兼容性、摘要和当前公钥签名后复用 APK；先复制到临时文件并校验，成功后原子替换，复制或校验失败时保留原始 APK。旧索引、bootstrap 和站点清单仍重新生成。目录不存在、旧版清单不支持复用、缓存损坏或密钥变化时正常重新处理。
+
+GitHub Actions 手动发布的 `check_installation` 选项默认关闭；勾选后运行两个架构的安装和升级检查，全部通过才能部署。定时发布跳过安装检查，始终保留完整性校验。修改依赖、bootstrap、固件 ABI 或发布逻辑后，应手动勾选此选项进行验证。
 
 ## repository.json
 
@@ -66,4 +71,4 @@ sing-box 的 `-r0`、OpenWrt 架构名和依赖声明依据[上游 APK 打包脚
 
 新增包时添加独立 `package.json` 并注册到根配置即可复用同步、签名和索引流程。先确认 APK v3 格式、来源、版本规则、许可证和精确依赖；`build` 会重新核对这些声明。上游有不同元数据时应审查后更新配置，不在流水线中自动放宽。
 
-新增架构需要添加 target 和各包的精确资产映射。`aarch64_generic` 同步上游 `sing-box_{version}_openwrt_aarch64_generic.apk`，LuCI 复用 `noarch` APK；两架构均执行包元数据、签名和索引校验。`scripts/check-openwrt.sh <site> <arch>` 在对应原生 runner 上检查容器安装和跨版本升级，发布须等待两架构检查完成。新增架构还需增加固定 rootfs、摘要和工作流矩阵；实际验证结果以远端 Actions 为准。
+新增架构需要添加 target 和各包的精确资产映射。`aarch64_generic` 同步上游 `sing-box_{version}_openwrt_aarch64_generic.apk`，LuCI 复用 `noarch` APK；两架构均执行包元数据、签名和索引校验。`scripts/check-openwrt.sh <site> <arch>` 在对应原生 runner 上检查容器安装和跨版本升级；勾选安装检查时，发布须等待两架构检查完成。新增架构还需增加固定 rootfs、摘要和工作流矩阵，并手动启用安装检查；实际验证结果以远端 Actions 为准。

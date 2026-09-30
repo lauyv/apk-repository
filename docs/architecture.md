@@ -3,14 +3,14 @@
 ```text
 GitHub Release API
   → stable 选择正式版 / latest 选择最近发布版
-  → 下载现成 OpenWrt APK，验证 GitHub SHA-256 与大小
+  → 下载或复用缓存中的现成 OpenWrt APK，验证 GitHub SHA-256 与大小
   → 校验 APK v3 的包名、版本、架构、许可证、依赖
   → 固定 Release 标签对应的提交，保存源码归档和 LICENSE
   → 无签名候选 artifact
   → repository-signing 环境审批
-  → 追加仓库签名、构建 bootstrap、签名 packages.adb
+  → 复用兼容的已签名 APK 或追加仓库签名，重新构建 bootstrap、签名 packages.adb
   → 全站 SHA256SUMS 与独立签名
-  → 无生产密钥的 OpenWrt 容器安装检查
+  → 完整性校验，以及手动按需启用的无生产密钥 OpenWrt 容器安装检查
   → 整体部署 GitHub Pages
 ```
 
@@ -43,7 +43,7 @@ public/
   sources/<package>/<commit>.LICENSE
 ```
 
-每次都从新目录生成两个通道，仅保留当前版本。没有历史版本目录、增量合并或线上回滚副本。同一上游提交在两个通道复用时，源码归档只保存一份。
+每次都从新目录生成两个通道，仅保留当前版本。未变更 APK 可复用上次经过验证的签名产物，但不合并旧站点目录；索引、bootstrap、发布清单和全站校验文件每次重新生成。没有历史版本目录或线上回滚副本。同一上游提交在两个通道复用时，源码归档只保存一份。
 
 索引显式使用 `${name}-${version}.apk` 的相对文件名；设备配置完整 `packages.adb` 地址。发布前检查索引集合与 manifest 一致，没有遗漏、多余包或历史版本。
 
@@ -64,10 +64,12 @@ public/
 
 工具链通过 GitHub Actions Cache 缓存编译好的 APK Tools，缓存键包含 runner 系统、CPU 架构、镜像版本、工具配置和构建脚本摘要；仅精确命中时跳过编译，恢复后检查工具版本。运行库仍正常安装。uv 下载缓存按锁文件和 Python 配置失效，由 setup-uv 区分平台与架构。
 
-OpenWrt rootfs 按架构缓存，缓存键包含安装检查脚本摘要（含固定镜像 SHA-256），缓存文件以镜像摘要命名。无论下载还是缓存恢复，都在导入 Docker 前校验 SHA-256。缓存仅包含工具和依赖，不包含私钥或发布站点；站点仍从空目录生成。缓存丢失时正常重新构建或下载，Actions artifact 的 1 天保留策略不变。
+OpenWrt rootfs 按架构缓存，缓存键包含安装检查脚本摘要（含固定镜像 SHA-256），缓存文件以镜像摘要命名。无论下载还是缓存恢复，都在导入 Docker 前校验 SHA-256。安装检查仅在手动发布勾选 `check_installation` 时执行；定时发布和默认手动发布跳过。启用检查时两架构必须成功，否则禁止部署；跳过检查时仍要求独立完整性校验成功。
+
+原始 APK 下载缓存以 GitHub SHA-256 命名，恢复后重新校验摘要、大小和元数据。签名 job 另行恢复上次经过完整校验的签名站点，用当前私钥导出的公钥认证旧 `SHA256SUMS.sig`，再通过签名覆盖的校验清单认证旧 manifest。仅来源、提交、Release、资产 ID 和摘要、版本、ABI、包配置及处理代码指纹一致的 APK 可复用，逐包重新检查摘要、签名和元数据。旧 manifest 无指纹、缓存损坏或密钥轮换时回退到原始 APK 重新签名。缓存保存最新经过签名和完整校验的候选站点，不要求该候选已经部署；只从中读取本次选中的兼容 APK，不沿用旧索引或清单。缓存不包含私钥，丢失时正常重新构建或下载，Actions artifact 的 1 天保留策略不变。
 
 每日北京时间 04:00 先执行 `uv run --locked python -m apk_repository check-updates`，沿用构建阶段的各通道选择规则，将上游 Release、源码提交、资产 ID 和摘要与线上 `manifest.json` 比较。无变化时跳过后续任务，不请求签名审批；站点返回 404 时执行首次发布，其他网络或解析错误使检查失败。手动触发始终重新发布，适用于配置、代码或密钥变更。检查只读取元数据，构建阶段再次解析并校验上游实际资产。
 
-`assemble` 没有签名密钥；`sign` 只处理和签名包，不安装或执行包脚本；后续 `verify` 和 `check-installation` job 不接触生产私钥。OpenWrt 25.12.0 rootfs 的固定 URL 和 SHA-256 来自官方 [x86/64](https://downloads.openwrt.org/releases/25.12.0/targets/x86/64/) 和 [armsr/armv8](https://downloads.openwrt.org/releases/25.12.0/targets/armsr/armv8/) 镜像列表。安装检查分别在 `ubuntu-24.04` 和 `ubuntu-24.04-arm` 原生 runner 上执行；完整性检查和两架构安装检查都通过后才能部署。
+`assemble` 没有签名密钥；`sign` 只处理和签名包，不安装或执行包脚本；后续 `verify` 和 `check-installation` job 不接触生产私钥。OpenWrt 25.12.0 rootfs 的固定 URL 和 SHA-256 来自官方 [x86/64](https://downloads.openwrt.org/releases/25.12.0/targets/x86/64/) 和 [armsr/armv8](https://downloads.openwrt.org/releases/25.12.0/targets/armsr/armv8/) 镜像列表。启用安装检查时，分别在 `ubuntu-24.04` 和 `ubuntu-24.04-arm` 原生 runner 上执行。修改依赖、bootstrap、固件 ABI 或发布逻辑后，应手动启用安装检查。
 
 容器通过 HTTP 读取实际 feed，完成依赖解析、安装和移除，并运行 `sing-box version`。另外按 APK 版本比较规则，将两个通道中同名包从较低版本安装后升级到较高版本，检查新版本已安装且旧版本不再存在；每个包使用独立容器。只有一个通道或版本相同的包明确记录跳过升级检查，不以重复安装代替跨版本升级，也不为测试保留历史包。容器使用 `--no-scripts`，此检查覆盖依赖解析和文件更新，不覆盖安装钩子、真实路由器的 procd、TUN 和网络功能。

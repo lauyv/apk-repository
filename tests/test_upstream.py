@@ -126,6 +126,21 @@ class UpstreamTests(unittest.TestCase):
             self.assertEqual(path.read_bytes(), b"original")
             self.assertFalse(path.with_name("asset.apk.partial").exists())
 
+    def test_verified_cached_asset_skips_network_and_corruption_is_redownloaded(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "asset.apk"
+            content = b"upstream APK"
+            digest = hashlib.sha256(content).hexdigest()
+            path.write_bytes(content)
+            with patch("apk_repository.upstream.open_url") as opened:
+                self.assertEqual(download("https://example.test/file", path, digest, len(content)), path)
+                opened.assert_not_called()
+            path.write_bytes(b"corrupt")
+            with patch("apk_repository.upstream.open_url", return_value=io.BytesIO(content)) as opened:
+                download("https://example.test/file", path, digest, len(content))
+                opened.assert_called_once()
+            self.assertEqual(path.read_bytes(), content)
+
 
 if __name__ == "__main__":
     unittest.main()
