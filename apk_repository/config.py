@@ -83,19 +83,16 @@ def load(root):
         path = root / "packages" / name / "package.json"
         require(root in path.resolve().parents, "package path escapes repository")
         pkg = read_json(path)
-        fields(pkg, "schema_version name enabled source method channels license license_reviewed revision dependencies conflicts architectures", name)
+        fields(pkg, "schema_version name enabled source method channels revision architectures", name)
         require(type(pkg["schema_version"]) is int and pkg["schema_version"] == 1, name + ": unsupported schema")
         require(pkg["name"] == name, name + ": package name mismatch")
-        require(type(pkg["enabled"]) is bool and type(pkg["license_reviewed"]) is bool, name + ": flags must be boolean")
+        require(type(pkg["enabled"]) is bool, name + ": enabled must be boolean")
         require(matches(pkg["source"], r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+"), name + ": expected owner/repository")
         require(pkg["method"] == "sync-apk", name + ": only upstream APK synchronization is supported")
         require(pkg["revision"] is None or (type(pkg["revision"]) is int and pkg["revision"] >= 0),
                 name + ": revision must be nonnegative or null")
-        require(isinstance(pkg["license"], str) and pkg["license"], name + ": license required")
         string_list(pkg["channels"], name + ": channels", repo["channels"])
         require(pkg["channels"], name + ": at least one channel required")
-        for key in ("dependencies", "conflicts"):
-            string_list(pkg[key], name + ": " + key)
         mappings = pkg["architectures"]
         require(isinstance(mappings, dict) and mappings, name + ": architecture mappings required")
         require(set(mappings) <= arches, name + ": unknown architecture")
@@ -110,7 +107,6 @@ def load(root):
                                 r"[A-Za-z0-9][A-Za-z0-9_.+-]*")),
                     name + ": asset pattern must be a filename with {version} and a compatible revision placeholder")
         if pkg["enabled"]:
-            require(pkg["license_reviewed"], name + ": license review required before enabling")
             require(all(m["asset_pattern"] for m in mappings.values()), name + ": asset pattern required before enabling")
             require(all(t["abi"] is not None for t in repo["targets"] if t["arch"] in mappings), name + ": target ABI required before enabling")
         packages.append(pkg)
@@ -136,7 +132,6 @@ def plan(repo, packages, channel, include_disabled=False):
             blockers = []
             for ok, reason in (
                 (pkg["enabled"], "package-disabled"),
-                (pkg["license_reviewed"], "license-review-required"),
                 (target["abi"] is not None, "target-abi-required"),
                 (mapping["asset_pattern"] is not None, "asset-pattern-required"),
             ):

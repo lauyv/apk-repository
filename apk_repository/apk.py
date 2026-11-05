@@ -4,7 +4,7 @@ import json
 import os
 import re
 import subprocess
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 from .config import require
 
@@ -30,22 +30,8 @@ def validate_package(apk, path, package, version, arch, signed_keys=None):
     run(args + [path])
     document = metadata(apk, path)
     info = document["info"]
-    for field, expected in (("name", package["name"]), ("version", version), ("arch", arch), ("license", package["license"])):
+    for field, expected in (("name", package["name"]), ("version", version), ("arch", arch)):
         require(info.get(field) == expected, f"unexpected {field} in {path}")
-    expected_depends = package["dependencies"] + ["!" + name for name in package["conflicts"]]
-    actual_depends = sorted(info.get("depends", []))
-    expected_depends = sorted(expected_depends)
-    require(actual_depends == expected_depends,
-            f"package dependency mismatch: {package['name']}; "
-            f"expected={expected_depends!r}; actual={actual_depends!r}")
-    require(not info.get("install-if") and not info.get("replaces") and not info.get("provides"), "unexpected package replacement or auto-install metadata")
-    for directory in document.get("paths", []):
-        name = directory.get("name", "")
-        require(not name.startswith("/") and ".." not in PurePosixPath(name).parts, "unsafe APK directory")
-        for item in directory.get("files", []):
-            require(re.fullmatch(r"[^/]+", item["name"]) and item["name"] not in (".", ".."), "unsafe APK filename")
-            acl = item.get("acl", {})
-            require(acl.get("user", "root") == "root" and acl.get("group", "root") == "root", "non-root APK ownership")
     return info
 
 

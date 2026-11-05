@@ -28,6 +28,8 @@ class PublishTests(unittest.TestCase):
         for channel in self.repo["channels"]:
             prerelease = channel != "stable"
             for pkg, target in itertools.product(self.packages, self.repo["targets"]):
+                if channel not in pkg["channels"]:
+                    continue
                 arch = target["arch"]
                 tag = "v1.3.0-beta.1" if prerelease else "v1.2.3"
                 pattern = pkg["architectures"][arch]["asset_pattern"]
@@ -54,8 +56,8 @@ class PublishTests(unittest.TestCase):
             return check_records(self.repo, self.packages, self.manifest, self.site, "apk")
 
     def test_complete_latest_only_set(self):
-        self.assertEqual(len(self.check()), len(self.repo["channels"]) * sum(
-            len(pkg["architectures"]) for pkg in self.packages))
+        self.assertEqual(len(self.check()), sum(
+            len(pkg["channels"]) * len(pkg["architectures"]) for pkg in self.packages))
 
     def test_latest_accepts_a_stable_upstream_release(self):
         for record in self.manifest["packages"]:
@@ -72,8 +74,8 @@ class PublishTests(unittest.TestCase):
                 path = self.site / record["file"]
                 path.write_bytes(b"fixture: metadata mocked")
                 record["asset_sha256"] = record["sha256"] = sha256(path)
-        self.assertEqual(len(self.check()), len(self.repo["channels"]) * sum(
-            len(pkg["architectures"]) for pkg in self.packages))
+        self.assertEqual(len(self.check()), sum(
+            len(pkg["channels"]) * len(pkg["architectures"]) for pkg in self.packages))
 
     def test_old_or_duplicate_version_cannot_enter_feed(self):
         extra = copy.deepcopy(self.manifest["packages"][0])

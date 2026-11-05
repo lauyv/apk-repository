@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "name": "luci-app-honk",
+  "enabled": true,
+  "source": "lauyv/luci-app-honk",
+  "method": "sync-apk",
+  "channels": [
+    "latest"
+  ],
+  "revision": null,
+  "architectures": {
+    "aarch64_generic": {
+      "asset_pattern": "luci-app-honk-{version}-r{revision}.apk",
+      "package_arch": "noarch"
+    },
+    "x86_64": {
+      "asset_pattern": "luci-app-honk-{version}-r{revision}.apk",
+      "package_arch": "noarch"
+    }
+  }
+}

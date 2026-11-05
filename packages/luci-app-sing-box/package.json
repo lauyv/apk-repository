@@ -5,11 +5,7 @@
   "source": "lauyv/luci-app-sing-box",
   "method": "sync-apk",
   "channels": ["stable", "latest"],
-  "license": "MIT",
-  "license_reviewed": true,
   "revision": null,
-  "dependencies": ["luci-base", "sing-box", "rpcd", "jshn", "jsonfilter", "uclient-fetch"],
-  "conflicts": [],
   "architectures": {
     "aarch64_generic": {
       "asset_pattern": "luci-app-sing-box-{version}-r{revision}.apk",

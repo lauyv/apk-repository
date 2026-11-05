@@ -5,11 +5,7 @@
   "source": "lauyv/luci-app-cake-tiny",
   "method": "sync-apk",
   "channels": ["stable", "latest"],
-  "license": "MIT",
-  "license_reviewed": true,
   "revision": null,
-  "dependencies": ["luci-base", "tc-tiny", "kmod-ifb", "kmod-sched-cake"],
-  "conflicts": [],
   "architectures": {
     "aarch64_generic": {
       "asset_pattern": "luci-app-cake-tiny-{version}-r{revision}.apk",

@@ -4,8 +4,8 @@
 GitHub Release API
   → stable 选择正式版 / latest 选择最近发布版
   → 下载或复用缓存中的现成 OpenWrt APK，验证 GitHub SHA-256 与大小
-  → 校验 APK v3 的包名、版本、架构、许可证、依赖
-  → 固定 Release 标签对应的提交，保存源码归档和 LICENSE
+  → 校验 APK v3 数据、包名、版本、架构
+  → 固定 Release 标签对应的提交，保存源码归档
   → 无签名候选 artifact
   → repository-signing 环境审批
   → 复用兼容的已签名 APK 或追加仓库签名，重新构建 bootstrap、签名 packages.adb
@@ -40,7 +40,6 @@ public/
       luci-app-sing-box-<latest-published-version>.apk
       apk-repository-latest-<version>.apk
   sources/<package>/<commit>.tar.gz
-  sources/<package>/<commit>.LICENSE
 ```
 
 每次都从新目录生成两个通道，仅保留当前版本。未变更 APK 可复用上次经过验证的签名产物，但不合并旧站点目录；索引、bootstrap、发布清单和全站校验文件每次重新生成。没有历史版本目录或线上回滚副本。同一上游提交在两个通道复用时，源码归档只保存一份。

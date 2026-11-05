@@ -52,7 +52,6 @@ class BuildCacheTests(unittest.TestCase):
                 patch("apk_repository.build.check_tool"),
                 patch("apk_repository.build.resolve_release", return_value=(release, "a" * 40)),
                 patch("apk_repository.build.select_asset", return_value=asset),
-                patch("apk_repository.build.source_license", return_value=b"MIT"),
                 patch("apk_repository.build.metadata", return_value={"info": {"version": f"1.2.3-r{revision}"}}),
                 patch("apk_repository.build.validate_package") as validate,
                 patch("apk_repository.build.index", side_effect=indexed) as index,

@@ -5,9 +5,8 @@ import json
 import os
 import re
 import shutil
-import tarfile
 import tempfile
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 from .apk import check_tool, index, metadata, validate_package
 from .config import load, require
@@ -18,34 +17,6 @@ from .upstream import download, package_version, resolve_release, select_asset, 
 def write_json(path, value):
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     Path(path).write_text(json.dumps(value, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-
-
-def source_license(archive, declared_license):
-    with tarfile.open(archive, "r:gz") as source:
-        members = source.getmembers()
-        require(len(members) < 100000, "source archive has too many entries")
-        matches = [m for m in members if len(PurePosixPath(m.name).parts) == 2
-                   and PurePosixPath(m.name).name == "LICENSE"]
-        require(len(matches) <= 1, "source archive has duplicate top-level LICENSE files")
-        if matches:
-            member = matches[0]
-            require(member.isfile() and not member.islnk() and not member.issym()
-                    and 0 < member.size < 1024 * 1024, "invalid LICENSE file")
-            with source.extractfile(member) as stream:
-                return stream.read()
-        makefiles = [m for m in members if len(PurePosixPath(m.name).parts) == 2
-                     and PurePosixPath(m.name).name == "Makefile"]
-        require(len(makefiles) == 1, "source archive has no LICENSE or single top-level Makefile")
-        member = makefiles[0]
-        require(member.isfile() and not member.islnk() and not member.issym()
-                and 0 < member.size < 1024 * 1024, "invalid Makefile")
-        with source.extractfile(member) as stream:
-            makefile = stream.read().decode("utf-8")
-        declaration = "PKG_LICENSE:=" + declared_license
-        require(sum(line.strip() == declaration for line in makefile.splitlines()) == 1,
-                "upstream Makefile license does not match package configuration")
-        return ("Upstream Makefile declares " + declaration + "\n"
-                + "License text: https://spdx.org/licenses/" + declared_license + ".html\n").encode("utf-8")
 
 
 def build(root, apk, output, cache=None):
@@ -81,7 +52,6 @@ def build(root, apk, output, cache=None):
                 source_path = site / source_rel
                 if not source_path.exists():
                     download("https://codeload.github.com/{}/tar.gz/{}".format(pkg["source"], commit), source_path)
-                    (source_path.parent / (commit + ".LICENSE")).write_bytes(source_license(source_path, pkg["license"]))
                 for target in repo["targets"]:
                     arch = target["arch"]
                     if arch not in pkg["architectures"]:

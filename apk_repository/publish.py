@@ -216,7 +216,7 @@ def sign(root, apk, unsigned, output, private_key, previous=None):
         # Copy only explicitly referenced input artifacts, never arbitrary build output.
         site.mkdir()
         for record in original["packages"]:
-            for relative in (record["file"], record["source_archive"], record["source_archive"].removesuffix(".tar.gz") + ".LICENSE"):
+            for relative in (record["file"], record["source_archive"]):
                 destination = site / relative
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(child(unsigned, relative), destination)

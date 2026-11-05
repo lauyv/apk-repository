@@ -105,7 +105,7 @@ class ReuseTests(unittest.TestCase):
     def test_package_config_and_tools_invalidate_fingerprint(self):
         expected = self.record["reuse_fingerprint"]
         package = copy.deepcopy(self.package)
-        package["dependencies"].append("new-dependency")
+        package["architectures"][self.target["arch"]]["asset_pattern"] = "changed-{version}.apk"
         self.assertNotEqual(fingerprint(self.repo, package, self.target), expected)
         repo = copy.deepcopy(self.repo)
         repo["apk_tools"]["version"] = "3.0.6"
