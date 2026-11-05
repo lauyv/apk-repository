@@ -75,11 +75,20 @@ class ConfigTests(unittest.TestCase):
         self.assertNotIn("luci-app-honk", [job["package"] for job in plan(repo, packages, "stable")["jobs"]])
         jobs = [job for job in plan(repo, packages, "latest")["jobs"] if job["package"] == "luci-app-honk"]
         self.assertEqual({job["arch"] for job in jobs}, {"x86_64", "aarch64_generic"})
-        self.assertTrue(all(job["package_arch"] == "noarch" and not job["blockers"] for job in jobs))
+        self.assertTrue(all(job["package_arch"] == job["arch"] and not job["blockers"] for job in jobs))
 
     def test_path_traversal(self):
         self.repo["packages"] = ["../outside"]
         self.reject("invalid package name")
+
+    def test_source_asset_patterns_reject_paths_and_unknown_placeholders(self):
+        for pattern in ("../source.tar.gz", "source-{version}.tar.gz", "https://example.com/source.tar.gz"):
+            self.packages[0]["source_assets"] = [pattern]
+            self.reject("invalid source asset pattern")
+
+    def test_asset_pattern_requires_exactly_one_version_placeholder(self):
+        self.packages[0]["architectures"]["x86_64"]["asset_pattern"] = "tool-{version}-{apk_version}.apk"
+        self.reject("asset pattern")
 
     def test_unknown_field(self):
         self.packages[0]["enabeld"] = True

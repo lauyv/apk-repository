@@ -13,6 +13,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class UpdateTests(unittest.TestCase):
+    def sources(self, patterns, digest="a" * 64):
+        return [{"id": i + 20, "name": p.replace("{tag}", "v1.0.0").replace("*", "v1.0.0"),
+                 "digest": "sha256:" + digest} for i, p in enumerate(patterns)]
+
     def check(self, published=None, error=None, digest="a" * 64):
         def release(source, channel):
             return {"id": 1, "tag_name": "v1.0.0", "prerelease": False}, "b" * 40
@@ -23,6 +27,8 @@ class UpdateTests(unittest.TestCase):
             patch("apk_repository.updates.select_asset", side_effect=lambda release, source, pattern: {
                 "id": 2, "name": pattern.replace("{version}", "1.0.0").replace("{revision}", "4"),
                 "digest": "sha256:" + digest}),
+            patch("apk_repository.updates.select_source_assets",
+                  side_effect=lambda release, source, patterns: self.sources(patterns, digest)),
             patch("apk_repository.updates.open_url", side_effect=error,
                   return_value=io.BytesIO(json.dumps(published).encode())),
         ):
@@ -40,7 +46,10 @@ class UpdateTests(unittest.TestCase):
                     "source_commit": "b" * 40, "release_id": 1, "release_tag": "v1.0.0",
                     "upstream_prerelease": False, "asset_id": 2,
                     "asset_name": pattern.replace("{version}", "1.0.0").replace("{revision}", "4"),
-                    "asset_sha256": "a" * 64})
+                    "asset_sha256": "a" * 64,
+                    "source_assets": [{"asset_id": a["id"], "asset_name": a["name"],
+                                       "sha256": a["digest"].split(":")[1]}
+                                      for a in self.sources(pkg.get("source_assets", []))]})
         return {"schema_version": 1, "packages": records}
 
     def test_unchanged_skips_publication(self):
@@ -53,6 +62,16 @@ class UpdateTests(unittest.TestCase):
         published = self.manifest()
         published["packages"][0]["asset_name"] = "old-name.apk"
         self.assertTrue(self.check(published))
+
+    def test_missing_or_replaced_bundled_sources_require_publication(self):
+        for field in ("source_assets", "sha256", "asset_id"):
+            published = self.manifest()
+            record = next(r for r in published["packages"] if r["name"] == "luci-app-honk")
+            if field == "source_assets":
+                del record[field]
+            else:
+                record["source_assets"][0][field] = "changed"
+            self.assertTrue(self.check(published))
 
     def test_new_architecture_requires_publication(self):
         published = self.manifest()

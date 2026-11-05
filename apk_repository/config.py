@@ -83,7 +83,13 @@ def load(root):
         path = root / "packages" / name / "package.json"
         require(root in path.resolve().parents, "package path escapes repository")
         pkg = read_json(path)
-        fields(pkg, "schema_version name enabled source method channels revision architectures", name)
+        fields(pkg, "schema_version name enabled source method channels revision architectures"
+               + (" source_assets" if isinstance(pkg, dict) and "source_assets" in pkg else ""), name)
+        source_assets = pkg.get("source_assets", [])
+        string_list(source_assets, name + ": source_assets")
+        require(all(pattern.endswith(".tar.gz") and pattern.count("{tag}") <= 1
+                    and matches(pattern.replace("{tag}", "v1.0.0"), r"[A-Za-z0-9][A-Za-z0-9_.*+-]*")
+                    for pattern in source_assets), name + ": invalid source asset pattern")
         require(type(pkg["schema_version"]) is int and pkg["schema_version"] == 1, name + ": unsupported schema")
         require(pkg["name"] == name, name + ": package name mismatch")
         require(type(pkg["enabled"]) is bool, name + ": enabled must be boolean")
@@ -101,11 +107,11 @@ def load(root):
             require(mapping["package_arch"] in (arch, "noarch"), name + ": incompatible package architecture")
             pattern = mapping["asset_pattern"]
             require(pattern is None or (isinstance(pattern, str) and pattern.endswith(".apk")
-                    and pattern.count("{version}") == 1
+                    and pattern.count("{version}") + pattern.count("{apk_version}") == 1
                     and pattern.count("{revision}") <= (1 if pkg["revision"] is None else 0)
-                    and matches(pattern.replace("{version}", "1.0.0").replace("{revision}", "1"),
+                    and matches(pattern.replace("{version}", "1.0.0").replace("{apk_version}", "1.0.0").replace("{revision}", "1"),
                                 r"[A-Za-z0-9][A-Za-z0-9_.+-]*")),
-                    name + ": asset pattern must be a filename with {version} and a compatible revision placeholder")
+                    name + ": asset pattern must be a filename with {version} or {apk_version} and a compatible revision placeholder")
         if pkg["enabled"]:
             require(all(m["asset_pattern"] for m in mappings.values()), name + ": asset pattern required before enabling")
             require(all(t["abi"] is not None for t in repo["targets"] if t["arch"] in mappings), name + ": target ABI required before enabling")

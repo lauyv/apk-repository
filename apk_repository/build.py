@@ -11,7 +11,14 @@ from pathlib import Path
 from .apk import check_tool, index, metadata, validate_package
 from .config import load, require
 from .reuse import fingerprint
-from .upstream import download, package_version, resolve_release, select_asset, sha256
+from .upstream import (
+    download,
+    package_version,
+    resolve_release,
+    select_asset,
+    select_source_assets,
+    sha256,
+)
 
 
 def write_json(path, value):
@@ -52,6 +59,17 @@ def build(root, apk, output, cache=None):
                 source_path = site / source_rel
                 if not source_path.exists():
                     download("https://codeload.github.com/{}/tar.gz/{}".format(pkg["source"], commit), source_path)
+                source_assets = []
+                for asset in select_source_assets(release, pkg["source"], pkg.get("source_assets", [])):
+                    digest = asset["digest"].split(":", 1)[1]
+                    used_downloads.add(digest)
+                    cached = download(asset["browser_download_url"], downloads / digest, digest, asset["size"])
+                    relative = f"sources/{pkg['name']}/{commit}/{asset['name']}"
+                    destination = site / relative
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copyfile(cached, destination)
+                    source_assets.append({"asset_id": asset["id"], "asset_name": asset["name"],
+                                          "sha256": digest, "file": relative})
                 for target in repo["targets"]:
                     arch = target["arch"]
                     if arch not in pkg["architectures"]:
@@ -76,6 +94,7 @@ def build(root, apk, output, cache=None):
                         "abi": target["abi"], "package_arch": mapping["package_arch"],
                         "file": destination.relative_to(site).as_posix(), "source": pkg["source"],
                         "source_commit": commit, "source_archive": source_rel, "source_sha256": sha256(source_path),
+                        "source_assets": source_assets,
                         "release_id": release["id"], "release_tag": release["tag_name"],
                         "upstream_prerelease": release["prerelease"], "asset_id": asset["id"],
                         "asset_name": asset["name"], "asset_sha256": digest, "sha256": sha256(destination),

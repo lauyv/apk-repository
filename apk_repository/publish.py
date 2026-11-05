@@ -1,6 +1,7 @@
 """Sign a complete feed, publish its public metadata, and verify it without executing packages."""
 
 import datetime
+import fnmatch
 import html
 import json
 import shutil
@@ -11,7 +12,13 @@ from .apk import check_tool, index, make_package, metadata, run, validate_packag
 from .build import write_json
 from .config import load, read_json, require
 from .reuse import fingerprint, previous_records, reuse_apk
-from .upstream import package_version, resolve_release, select_asset, sha256
+from .upstream import (
+    package_version,
+    resolve_release,
+    select_asset,
+    select_source_assets,
+    sha256,
+)
 
 
 def child(root, relative):
@@ -48,6 +55,16 @@ def check_records(repo, packages, manifest, site, apk, keys=None):
         if keys is None:
             require(record["sha256"] == record["asset_sha256"], "upstream APK was modified before signing")
         require(sha256(child(site, record["source_archive"])) == record["source_sha256"], "source digest mismatch")
+        sources = record.get("source_assets", [])
+        patterns = pkg.get("source_assets", [])
+        require(len(sources) == len(patterns), "missing/unexpected source assets")
+        require(len({a["asset_name"] for a in sources}) == len(sources), "duplicate source asset")
+        for source, source_pattern in zip(sources, patterns):
+            require(fnmatch.fnmatchcase(source["asset_name"], source_pattern.replace("{tag}", record["release_tag"])),
+                    "source asset does not match configured pattern")
+            relative = f"sources/{pkg['name']}/{record['source_commit']}/{source['asset_name']}"
+            require(source["file"] == relative, "noncanonical source filename")
+            require(sha256(child(site, relative)) == source["sha256"], "source asset digest mismatch")
         validate_package(apk, path, pkg, record["version"], pkg["architectures"][record["arch"]]["package_arch"], keys)
     require(seen == set(expected), "manifest is missing configured packages")
     return seen
@@ -73,6 +90,14 @@ def check_upstream_assets(packages, manifest, site):
         require(record["asset_id"] == asset["id"] and record["asset_name"] == asset["name"]
                 and record["asset_sha256"] == digest and sha256(child(site, record["file"])) == digest,
                 "upstream APK does not match GitHub Release asset")
+        assets = select_source_assets(release, pkg["source"], pkg.get("source_assets", []))
+        sources = record.get("source_assets", [])
+        require(len(sources) == len(assets), "missing/unexpected source assets")
+        for source, asset in zip(sources, assets):
+            digest = asset["digest"].split(":", 1)[1]
+            require(source["asset_id"] == asset["id"] and source["asset_name"] == asset["name"]
+                    and source["sha256"] == digest and sha256(child(site, source["file"])) == digest,
+                    "source asset does not match GitHub Release")
 
 
 def bootstrap(apk, repo, site, work, channel, arch, version, license_path):
@@ -102,10 +127,12 @@ def render_site(repo, site, manifest):
         return html.escape(str(value), quote=quote)
 
     def package_item(record):
+        sources = ''.join(' · <a href="{}">{}</a>'.format(
+            escape(a["file"], quote=True), escape(a["asset_name"])) for a in record.get("source_assets", []))
         return ('<li><span class="name">{}</span><code>{}</code>'
-                '<span class="links"><a href="{}">APK</a> · <a href="{}">源码</a></span></li>').format(
+                '<span class="links"><a href="{}">APK</a> · <a href="{}">源码</a>{}</span></li>').format(
                     escape(record["name"]), escape(record["version"]),
-                    escape(record["file"], quote=True), escape(record["source_archive"], quote=True))
+                    escape(record["file"], quote=True), escape(record["source_archive"], quote=True), sources)
 
     def arch_folder(channel, target):
         arch = target["arch"]
@@ -216,7 +243,8 @@ def sign(root, apk, unsigned, output, private_key, previous=None):
         # Copy only explicitly referenced input artifacts, never arbitrary build output.
         site.mkdir()
         for record in original["packages"]:
-            for relative in (record["file"], record["source_archive"]):
+            for relative in (record["file"], record["source_archive"],
+                             *(a["file"] for a in record.get("source_assets", []))):
                 destination = site / relative
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(child(unsigned, relative), destination)

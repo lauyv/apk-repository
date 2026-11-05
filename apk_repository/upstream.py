@@ -1,5 +1,6 @@
 """Resolve immutable GitHub Release inputs and download verified assets."""
 
+import fnmatch
 import hashlib
 import json
 import os
@@ -27,7 +28,7 @@ def version_parts(tag):
 
 def package_version(tag, pattern, asset_name, revision, observed_version=None):
     upstream, apk = version_parts(tag)
-    expected = pattern.replace("{version}", upstream)
+    expected = pattern.replace("{version}", upstream).replace("{apk_version}", apk)
     if revision is None:
         if "{revision}" in expected:
             expression = re.escape(expected).replace(r"\{revision\}", r"(0|[1-9][0-9]*)")
@@ -176,16 +177,34 @@ def resolve_release(source, channel, tag=None):
 
 
 def select_asset(release, source, pattern):
-    version, _ = version_parts(release["tag_name"])
-    expected = pattern.replace("{version}", version)
+    version, apk_version = version_parts(release["tag_name"])
+    expected = pattern.replace("{version}", version).replace("{apk_version}", apk_version)
     expression = re.escape(expected).replace(r"\{revision\}", r"(0|[1-9][0-9]*)")
     assets = [a for a in release["assets"] if re.fullmatch(expression, a["name"])]
     require(len(assets) == 1, "Release must contain exactly one asset matching " + expected)
     asset = assets[0]
+    validate_asset(release, source, asset)
+    return asset
+
+
+def select_source_assets(release, source, patterns):
+    selected = []
+    for pattern in patterns:
+        expected = pattern.replace("{tag}", release["tag_name"])
+        assets = [a for a in release["assets"] if fnmatch.fnmatchcase(a["name"], expected)]
+        require(len(assets) == 1, "Release must contain exactly one source asset matching " + expected)
+        asset = assets[0]
+        require(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.+-]*", asset["name"]), "unsafe source asset name")
+        require(asset not in selected, "duplicate source asset")
+        validate_asset(release, source, asset)
+        selected.append(asset)
+    return selected
+
+
+def validate_asset(release, source, asset):
     require(re.fullmatch(r"sha256:[0-9a-f]{64}", asset.get("digest") or ""), "asset has no GitHub SHA-256 digest")
     require(type(asset["size"]) is int and 0 < asset["size"] <= MAX_DOWNLOAD, "invalid asset size")
     url = urllib.parse.urlsplit(asset["browser_download_url"])
     require(url.scheme == "https" and url.hostname == "github.com"
             and urllib.parse.unquote(url.path) == "/{}/releases/download/{}/{}".format(source, release["tag_name"], asset["name"]),
             "asset URL does not belong to the configured repository and Release")
-    return asset

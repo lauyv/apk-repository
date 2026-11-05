@@ -8,14 +8,18 @@
     "latest"
   ],
   "revision": null,
+  "source_assets": [
+    "honk-source-{tag}.tar.gz",
+    "doona-source-*.tar.gz"
+  ],
   "architectures": {
     "aarch64_generic": {
-      "asset_pattern": "luci-app-honk-{version}-r{revision}.apk",
-      "package_arch": "noarch"
+      "asset_pattern": "luci-app-honk-{apk_version}-r{revision}-aarch64_generic.apk",
+      "package_arch": "aarch64_generic"
     },
     "x86_64": {
-      "asset_pattern": "luci-app-honk-{version}-r{revision}.apk",
-      "package_arch": "noarch"
+      "asset_pattern": "luci-app-honk-{apk_version}-r{revision}-x86_64.apk",
+      "package_arch": "x86_64"
     }
   }
 }

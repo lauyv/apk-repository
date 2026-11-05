@@ -11,7 +11,7 @@
 | `sing-box`           | 代理核心          | `SagerNet/sing-box`        |
 | `luci-app-sing-box`  | LuCI 管理界面     | `lauyv/luci-app-sing-box`  |
 | `luci-app-cake-tiny` | CAKE 流量整形界面 | `lauyv/luci-app-cake-tiny` |
-| `luci-app-honk` | honk 配置、服务与核心管理（仅 latest） | `lauyv/luci-app-honk` |
+| `luci-app-honk` | 内置 Honk 核心的 LuCI 配置与服务管理（仅 latest） | `lauyv/luci-app-honk` |
 
 软件包来自上游编译好的 OpenWrt APK，保留原始内容和依赖。其他架构、opkg/IPK 系统不适用当前订阅地址。
 
