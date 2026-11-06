@@ -1,6 +1,5 @@
 """Resolve immutable GitHub Release inputs and download verified assets."""
 
-import fnmatch
 import hashlib
 import json
 import os
@@ -174,24 +173,6 @@ def select_asset(release, source, pattern):
     if "{revision}" in pattern:
         package_version(release["tag_name"], pattern, asset["name"])
     return asset
-
-
-def source_asset_pattern(pattern, tag):
-    return pattern.replace("{version}", version_parts(tag)[0])
-
-
-def select_source_assets(release, source, patterns):
-    selected = []
-    for pattern in patterns:
-        expected = source_asset_pattern(pattern, release["tag_name"])
-        assets = [a for a in release["assets"] if fnmatch.fnmatchcase(a["name"], expected)]
-        require(len(assets) == 1, "Release must contain exactly one source asset matching " + expected)
-        asset = assets[0]
-        require(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.+-]*", asset["name"]), "unsafe source asset name")
-        require(asset not in selected, "duplicate source asset")
-        validate_asset(release, source, asset)
-        selected.append(asset)
-    return selected
 
 
 def validate_asset(release, source, asset):

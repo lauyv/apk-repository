@@ -51,11 +51,6 @@ class ConfigTests(unittest.TestCase):
         self.repo["channels"] = ["stable", "latest"]
         self.reject("unexpected or missing fields")
 
-    def test_source_asset_patterns_reject_paths_and_unknown_placeholders(self):
-        for pattern in ("../source.tar.gz", "source-{unknown}.tar.gz", "https://example.com/source.tar.gz"):
-            self.packages[0]["source_assets"] = [pattern]
-            self.reject("invalid source asset pattern")
-
     def test_asset_pattern_requires_exactly_one_version_placeholder(self):
         self.packages[0]["architectures"]["x86_64"]["asset_pattern"] = "tool-{version}-{apk_version}.apk"
         self.reject("asset pattern")

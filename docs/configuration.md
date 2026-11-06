@@ -38,13 +38,12 @@ URL 不包含 ABI，同一站点不能混合固件系列。APK Tools 固定为 3
 | `schema_version`、`name` | `1`、与目录相同的包名 |
 | `source` | GitHub `owner/repository` |
 | `architectures` | 各目标架构的 `asset_pattern` 和 `package_arch` |
-| `source_assets` | 可选的 Release 源码归档模式，支持 `{version}` 和 `*`，每个模式须唯一匹配 `.tar.gz` |
 
 包名列表中的包全部参与构建。新增包需注册到根配置；移除包则从列表删除。配置不提供禁用状态、多通道或固定包修订号。
 
 `asset_pattern` 含且仅含一个 `{version}` 或 `{apk_version}`。前者去掉标签的 `v` 和 `-rN`，后者转换为 APK 版本格式。例如 `v0.1.0-beta.5-r3` 对应 `0.1.0-beta.5` 和 `0.1.0_beta5`。资产名称带修订号时使用 `{revision}`，否则从 APK 元数据读取。标签带 `-rN` 时要求与包修订号一致。
 
-Honk 同步两个目标架构的 `luci-app-honk-{apk_version}-r{revision}-<架构>.apk`，并保留同一 Release 的 `honk-source-v{version}.tar.gz` 和唯一的 `doona-source-*.tar.gz`。核心、Geo 数据和依赖声明由上游 APK 提供。
+Honk 同步两个目标架构的 `luci-app-honk-{apk_version}-r{revision}-<架构>.apk`。核心、Geo 数据和依赖声明由上游 APK 提供。
 
 ## 缓存与安装检查
 

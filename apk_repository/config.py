@@ -79,14 +79,7 @@ def load(root):
         path = root / "packages" / name / "package.json"
         require(root in path.resolve().parents, "package path escapes repository")
         pkg = read_json(path)
-        fields(pkg, "schema_version name source architectures"
-               + (" source_assets" if isinstance(pkg, dict) and "source_assets" in pkg else ""), name)
-        source_assets = pkg.get("source_assets", [])
-        string_list(source_assets, name + ": source_assets")
-        require(all(pattern.endswith(".tar.gz") and pattern.count("{version}") <= 1
-                    and matches(pattern.replace("{version}", "1.0.0"),
-                                r"[A-Za-z0-9][A-Za-z0-9_.*+-]*")
-                    for pattern in source_assets), name + ": invalid source asset pattern")
+        fields(pkg, "schema_version name source architectures", name)
         require(type(pkg["schema_version"]) is int and pkg["schema_version"] == 1, name + ": unsupported schema")
         require(pkg["name"] == name, name + ": package name mismatch")
         require(matches(pkg["source"], r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+"), name + ": expected owner/repository")

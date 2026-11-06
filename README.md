@@ -64,4 +64,4 @@ mv /tmp/apk-repository.pem /etc/apk/keys/apk-repository.pem
 
 订阅或安装问题可在 [Issues](https://github.com/lauyv/apk-repository/issues) 反馈。安全问题见 [SECURITY.md](SECURITY.md)，实现与贡献说明见 [docs](docs/README.md)。
 
-本仓库代码与文档使用 [MIT](LICENSE)，上游软件包保留各自许可证。当前版本的上游源码归档和许可证随站点发布。
+本仓库代码与文档使用 [MIT](LICENSE)，上游软件包保留各自许可证。上游源码与许可证请查阅对应项目。

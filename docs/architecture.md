@@ -8,7 +8,7 @@
 
 每日北京时间 04:00 检查上游 Release、提交、资产 ID 和摘要。只查询发布列表首页，取首个非草稿版本，不扫描历史页；签名前按选定标签精确复核。无变化则跳过构建；站点 404 触发首次发布，其他错误使检查失败。手动触发始终重新发布，适用于配置、代码和密钥变更。
 
-`assemble` 不持有生产私钥，下载上游现成 OpenWrt APK 并校验 SHA-256、大小、包名、版本和架构，同时保存固定提交的源码与声明的源码资产。只生成无签名候选和清单，不生成索引。
+`assemble` 不持有生产私钥，下载上游现成 OpenWrt APK 并校验 SHA-256、大小、包名、版本和架构。只生成无签名候选和清单，不生成索引。
 
 `sign` 使用 `repository-signing` 环境中的密钥，独立查询上游并核对候选来源。追加 APK 签名后比较元数据，生成并签名 `packages.adb`，写入静态下载列表和安装说明，最后生成 `SHA256SUMS` 及独立签名。完整站点验证在该 job 中执行一次，通过后上传 Pages artifact。
 
@@ -32,11 +32,9 @@ public/
         packages.adb
         manifest.json
         <package>-<version>.apk
-  sources/<package>/<commit>.tar.gz
-  sources/<package>/<commit>/<source-asset>.tar.gz
 ```
 
-站点从空目录生成，整体部署，只含当前包、源码和索引。页面为按架构分组的静态下载列表。设备直接安装公钥和配置 latest 源；不生成 bootstrap 配置包。
+站点从空目录生成，整体部署，只含当前包和索引。页面为按架构分组的静态下载列表。设备直接安装公钥和配置 latest 源；不生成 bootstrap 配置包。
 
 APK Tools 二进制使用精确配置和构建脚本作为缓存键，命中后检查版本。上游下载缓存按 SHA-256 复用，OpenWrt rootfs 按固定摘要缓存；使用前均重新校验。未缓存签名站点，不传输旧站点来复用签名。Actions 中间 artifact 保留 1 天。
 

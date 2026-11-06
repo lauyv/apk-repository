@@ -14,7 +14,6 @@ from apk_repository.upstream import (
     resolve_tag_commit,
     select_asset,
     select_release,
-    select_source_assets,
     version_parts,
 )
 
@@ -126,36 +125,6 @@ class UpstreamTests(unittest.TestCase):
                                  f"1.2.3_{suffix}4-r2")
                 with self.assertRaisesRegex(ConfigError, "metadata version mismatch"):
                     package_version(release["tag_name"], pattern, asset["name"], "1.2.3-r2")
-
-    def test_source_selection_requires_unique_verified_release_assets(self):
-        release = self.asset_release()
-        asset = release["assets"][0]
-        asset["name"] = "doona-source-v1.0.0.tar.gz"
-        asset["browser_download_url"] = (
-            f"https://github.com/owner/tool/releases/download/v1.2.3/{asset['name']}")
-        self.assertEqual(select_source_assets(release, "owner/tool", ["doona-source-*.tar.gz"]), [asset])
-        for patterns in (["honk-source-v9.9.9.tar.gz"], ["doona-source-*.tar.gz"] * 2):
-            with self.assertRaises(ConfigError):
-                select_source_assets(release, "owner/tool", patterns)
-        release["assets"].append(dict(asset, name="doona-source-v2.0.0.tar.gz"))
-        with self.assertRaisesRegex(ConfigError, "exactly one source"):
-            select_source_assets(release, "owner/tool", ["doona-source-*.tar.gz"])
-
-        release["assets"].pop()
-        asset["digest"] = None
-        with self.assertRaisesRegex(ConfigError, "SHA-256"):
-            select_source_assets(release, "owner/tool", ["doona-source-*.tar.gz"])
-
-    def test_revisioned_release_selects_core_source_without_revision(self):
-        release = self.asset_release()
-        release["tag_name"] = "v1.2.3-beta.4-r3"
-        asset = release["assets"][0]
-        asset["name"] = "honk-source-v1.2.3-beta.4.tar.gz"
-        asset["browser_download_url"] = (
-            f"https://github.com/owner/tool/releases/download/{release['tag_name']}/{asset['name']}")
-        self.assertEqual(select_source_assets(release, "owner/tool", ["honk-source-v{version}.tar.gz"]), [asset])
-        with self.assertRaisesRegex(ConfigError, "exactly one source"):
-            select_source_assets(release, "owner/tool", ["honk-source-v9.9.9.tar.gz"])
 
     def test_digest_and_provenance_are_required(self):
         release = self.asset_release()

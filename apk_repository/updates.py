@@ -5,16 +5,14 @@ import os
 import urllib.error
 
 from .config import load, require
-from .upstream import open_url, resolve_release, select_asset, select_source_assets
+from .upstream import open_url, resolve_release, select_asset
 
 FIELDS = ("channel", "arch", "name", "source", "source_commit",
           "release_id", "release_tag", "upstream_prerelease", "asset_id", "asset_name", "asset_sha256")
 
 
 def identities(records):
-    return sorted(tuple(record[field] for field in FIELDS) + (
-        tuple((asset["asset_id"], asset["asset_name"], asset["sha256"])
-              for asset in record.get("source_assets", [])),) for record in records)
+    return sorted(tuple(record[field] for field in FIELDS) for record in records)
 
 
 def check_updates(root):
@@ -33,8 +31,6 @@ def check_updates(root):
     records = []
     for pkg in packages:
         release, commit = resolve_release(pkg["source"])
-        source_assets = [{"asset_id": a["id"], "asset_name": a["name"], "sha256": a["digest"].split(":", 1)[1]}
-                         for a in select_source_assets(release, pkg["source"], pkg.get("source_assets", []))]
         for target in repo["targets"]:
             arch = target["arch"]
             if arch not in pkg["architectures"]:
@@ -46,7 +42,7 @@ def check_updates(root):
                 "source_commit": commit, "release_id": release["id"],
                 "release_tag": release["tag_name"], "upstream_prerelease": release["prerelease"],
                 "asset_id": asset["id"], "asset_name": asset["name"],
-                "asset_sha256": asset["digest"].split(":", 1)[1], "source_assets": source_assets})
+                "asset_sha256": asset["digest"].split(":", 1)[1]})
     require(records, "no packages")
     changed = current is None or identities(records) != identities(current["packages"])
     message = "Upstream changes detected; publication required." if changed else "No upstream changes; publication skipped."

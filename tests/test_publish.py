@@ -42,27 +42,11 @@ class PublishTests(unittest.TestCase):
             path = self.site / relative
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(b"fixture: metadata mocked")
-            source_rel = "sources/{}/source.tar.gz".format(pkg["name"])
-            source = self.site / source_rel
-            source.parent.mkdir(parents=True, exist_ok=True)
-            source.write_bytes(b"fixture source")
             self.manifest["packages"].append({"name": pkg["name"], "channel": "latest", "arch": arch,
                 "abi": "openwrt-25.12", "source": pkg["source"], "release_tag": tag,
                 "upstream_prerelease": True, "version": version, "file": relative,
-                "source_archive": source_rel, "source_sha256": sha256(source),
                 "asset_name": asset_name, "asset_sha256": sha256(path), "sha256": sha256(path),
-                "source_commit": "a" * 40, "source_assets": self.sources(pkg, tag)})
-
-    def sources(self, pkg, tag):
-        sources = []
-        for i, pattern in enumerate(pkg.get("source_assets", [])):
-            name = pattern.replace("{version}", version_parts(tag)[0]).replace("*", "v1.0.0")
-            relative = f"sources/{pkg['name']}/{'a' * 40}/{name}"
-            path = self.site / relative
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(b"bundled source")
-            sources.append({"asset_id": i + 20, "asset_name": name, "file": relative, "sha256": sha256(path)})
-        return sources
+                "source_commit": "a" * 40})
 
     def check(self):
         with patch("apk_repository.publish.validate_package"):
@@ -109,6 +93,7 @@ class PublishTests(unittest.TestCase):
                 manifest = json.loads((output / "manifest.json").read_text())
                 self.assertNotIn("bootstrap", manifest)
                 self.assertEqual(len(list(output.rglob("*.apk"))), 8)
+                self.assertFalse(list(output.rglob("*.tar.gz")))
                 self.assertEqual(len(manifest["indexes"]), 2)
                 (output / manifest["packages"][0]["file"]).write_bytes(b"tampered")
                 with self.assertRaisesRegex(ConfigError, "checksum mismatch"):
@@ -123,7 +108,6 @@ class PublishTests(unittest.TestCase):
                 record["asset_name"] = pattern.replace("{version}", "1.2.3").replace("{apk_version}", "1.2.3").replace("{revision}", "4")
                 observed = "1.2.3-r0" if pkg["name"] == "sing-box" else None
                 record["version"] = package_version("v1.2.3", pattern, record["asset_name"], observed)
-                record["source_assets"] = self.sources(pkg, "v1.2.3")
                 record["upstream_prerelease"] = False
                 record["file"] = "apk/{}/{}/{}-{}.apk".format(
                     record["channel"], record["arch"], record["name"], record["version"])
@@ -167,40 +151,11 @@ class PublishTests(unittest.TestCase):
         with self.assertRaises(ConfigError):
             child(self.site, "../outside")
 
-    def test_missing_or_modified_bundled_sources_block_publication(self):
-        record = next(r for r in self.manifest["packages"] if r["name"] == "luci-app-honk")
-        sources = record["source_assets"]
-        record["source_assets"] = []
-        with self.assertRaisesRegex(ConfigError, "source assets"):
-            self.check()
-        record["source_assets"] = sources
-        (self.site / sources[0]["file"]).write_bytes(b"tampered")
-        with self.assertRaisesRegex(ConfigError, "source asset digest"):
-            self.check()
-
     def test_revisioned_honk_release_passes_signer_record_checks(self):
         for record in self.manifest["packages"]:
             if record["name"] == "luci-app-honk":
                 record["release_tag"] += "-r5"
         self.check()
-
-    def test_signer_rechecks_bundled_sources_independently(self):
-        record = next(r for r in self.manifest["packages"] if r["name"] == "luci-app-honk")
-        record.update(release_id=7, asset_id=9)
-        manifest = dict(self.manifest, packages=[record])
-        release = {"id": 7, "prerelease": True}
-        asset = {"id": 9, "name": record["asset_name"], "digest": "sha256:" + record["asset_sha256"]}
-        sources = [{"id": a["asset_id"], "name": a["asset_name"], "digest": "sha256:" + a["sha256"]}
-                   for a in record["source_assets"]]
-        with (patch("apk_repository.publish.resolve_release", return_value=(release, "a" * 40)),
-              patch("apk_repository.publish.select_asset", return_value=asset),
-              patch("apk_repository.publish.select_source_assets", return_value=sources)):
-            check_upstream_assets(self.packages, manifest, self.site)
-            source = record["source_assets"][0]
-            (self.site / source["file"]).write_bytes(b"tampered")
-            source["sha256"] = sha256(self.site / source["file"])
-            with self.assertRaisesRegex(ConfigError, "source asset does not match GitHub"):
-                check_upstream_assets(self.packages, manifest, self.site)
 
     def test_signer_rechecks_asset_digest_independently(self):
         record = self.manifest["packages"][0]
@@ -228,8 +183,7 @@ class RenderSiteTests(unittest.TestCase):
                                  {"arch": "aarch64_generic", "abi": "openwrt-25.12"}]}
         self.manifest = {"key_sha256": "ab" * 32, "packages": [
             {"channel": "latest", "arch": "x86_64", "name": "sing-box", "version": "1.2.3-r0",
-             "file": "apk/latest/x86_64/sing-box-1.2.3-r0.apk",
-             "source_archive": "sources/sing-box/source.tar.gz"},
+             "file": "apk/latest/x86_64/sing-box-1.2.3-r0.apk"},
         ]}
         render_site(self.repo, self.site, self.manifest)
         self.page = (self.site / "index.html").read_text()
@@ -246,20 +200,10 @@ class RenderSiteTests(unittest.TestCase):
         self.assertIn("<h2>aarch64_generic</h2>", self.page)
         self.assertIn('href="apk/latest/aarch64_generic/packages.adb"', self.page)
 
-    def test_bundled_sources_have_download_links(self):
-        self.manifest["packages"][0]["source_assets"] = [
-            {"asset_name": "honk-source-v1.0.0.tar.gz", "file": "sources/honk/core.tar.gz"},
-            {"asset_name": "doona-source-v1.0.0.tar.gz", "file": "sources/honk/ui.tar.gz"}]
-        render_site(self.repo, self.site, self.manifest)
-        page = (self.site / "index.html").read_text()
-        self.assertIn('href="sources/honk/core.tar.gz">honk-source-v1.0.0.tar.gz</a>', page)
-        self.assertIn('href="sources/honk/ui.tar.gz">doona-source-v1.0.0.tar.gz</a>', page)
-
     def test_filenames_and_links_are_escaped(self):
         self.manifest["packages"].append({
             "channel": "latest", "arch": "x86_64", "name": "<script>alert(1)</script>",
-            "version": "1-r0", "file": 'apk/<img src=x>.apk" onmouseover="1',
-            "source_archive": "sources/a.tar.gz"})
+            "version": "1-r0", "file": 'apk/<img src=x>.apk" onmouseover="1'})
         render_site(self.repo, self.site, self.manifest)
         page = (self.site / "index.html").read_text()
         self.assertNotIn("<script>", page)

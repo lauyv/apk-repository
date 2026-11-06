@@ -2,10 +2,6 @@
   "schema_version": 1,
   "name": "luci-app-honk",
   "source": "lauyv/luci-app-honk",
-  "source_assets": [
-    "honk-source-v{version}.tar.gz",
-    "doona-source-*.tar.gz"
-  ],
   "architectures": {
     "aarch64_generic": {
       "asset_pattern": "luci-app-honk-{apk_version}-r{revision}-aarch64_generic.apk",
