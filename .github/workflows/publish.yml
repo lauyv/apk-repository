@@ -89,6 +89,7 @@ jobs:
 
   sign:
     needs: assemble
+    if: ${{ !cancelled() && needs.assemble.result == 'success' }}
     environment: repository-signing
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -132,7 +133,7 @@ jobs:
 
   check-installation:
     needs: sign
-    if: github.event_name == 'workflow_dispatch' && inputs.check_installation
+    if: ${{ !cancelled() && needs.sign.result == 'success' && github.event_name == 'workflow_dispatch' && inputs.check_installation }}
     strategy:
       fail-fast: false
       matrix:
