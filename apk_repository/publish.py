@@ -1,6 +1,5 @@
 """Sign a complete feed, publish its public metadata, and verify it without executing packages."""
 
-import datetime
 import fnmatch
 import html
 import json
@@ -8,16 +7,16 @@ import shutil
 import tempfile
 from pathlib import Path, PurePosixPath
 
-from .apk import check_tool, index, make_package, metadata, run, validate_package
+from .apk import check_tool, index, metadata, run, validate_package
 from .build import write_json
 from .config import load, read_json, require
-from .reuse import fingerprint, previous_records, reuse_apk
 from .upstream import (
     package_version,
     resolve_release,
     select_asset,
     select_source_assets,
     sha256,
+    source_asset_pattern,
 )
 
 
@@ -33,8 +32,8 @@ def child(root, relative):
 def check_records(repo, packages, manifest, site, apk, keys=None):
     require(manifest.get("schema_version") == 1, "unsupported manifest")
     require(manifest["apk_tools"] == repo["apk_tools"] and manifest["base_url"] == repo["base_url"], "manifest/configuration mismatch")
-    expected = {(c, t["arch"], p["name"]): (p, t) for c in repo["channels"] for t in repo["targets"]
-                for p in packages if p["enabled"] and c in p["channels"] and t["arch"] in p["architectures"]}
+    expected = {("latest", t["arch"], p["name"]): (p, t) for t in repo["targets"]
+                for p in packages if t["arch"] in p["architectures"]}
     seen = set()
     for record in manifest["packages"]:
         identity = record["channel"], record["arch"], record["name"]
@@ -44,10 +43,8 @@ def check_records(repo, packages, manifest, site, apk, keys=None):
         require(record["source"] == pkg["source"] and record["abi"] == target["abi"], "wrong package provenance")
         pattern = pkg["architectures"][record["arch"]]["asset_pattern"]
         version = package_version(record["release_tag"], pattern, record["asset_name"],
-                                  pkg["revision"], record["version"])
+                                  record["version"])
         require(record["version"] == version, "wrong APK version")
-        if record["channel"] == "stable":
-            require(not record["upstream_prerelease"], "prerelease package in stable feed")
         expected_file = "apk/{}/{}/{}-{}.apk".format(*identity[:2], record["name"], record["version"])
         require(record["file"] == expected_file, "noncanonical APK filename")
         path = child(site, record["file"])
@@ -60,7 +57,7 @@ def check_records(repo, packages, manifest, site, apk, keys=None):
         require(len(sources) == len(patterns), "missing/unexpected source assets")
         require(len({a["asset_name"] for a in sources}) == len(sources), "duplicate source asset")
         for source, source_pattern in zip(sources, patterns):
-            require(fnmatch.fnmatchcase(source["asset_name"], source_pattern.replace("{tag}", record["release_tag"])),
+            require(fnmatch.fnmatchcase(source["asset_name"], source_asset_pattern(source_pattern, record["release_tag"])),
                     "source asset does not match configured pattern")
             relative = f"sources/{pkg['name']}/{record['source_commit']}/{source['asset_name']}"
             require(source["file"] == relative, "noncanonical source filename")
@@ -76,7 +73,7 @@ def check_upstream_assets(packages, manifest, site):
     releases = {}
     for record in manifest["packages"]:
         pkg = configured[record["name"]]
-        key = (pkg["source"], record["channel"], record["release_tag"])
+        key = (pkg["source"], record["release_tag"])
         if key not in releases:
             releases[key] = resolve_release(*key)
         release, commit = releases[key]
@@ -100,130 +97,53 @@ def check_upstream_assets(packages, manifest, site):
                     "source asset does not match GitHub Release")
 
 
-def bootstrap(apk, repo, site, work, channel, arch, version, license_path):
-    name = "apk-repository-" + channel
-    root = work / name / arch
-    keys = root / "etc/apk/keys"
-    keys.mkdir(parents=True)
-    shutil.copyfile(site / "apk/apk-repository.pem", keys / "apk-repository.pem")
-    feeds = root / "etc/apk/repositories.d"
-    feeds.mkdir(parents=True)
-    (feeds / "apk-repository.list").write_text("@lauyv {}/apk/{}/{}/packages.adb\n".format(repo["base_url"], channel, arch))
-    license_directory = root / "usr/share/licenses" / name
-    license_directory.mkdir(parents=True)
-    shutil.copyfile(license_path, license_directory / "LICENSE")
-    # Keep the retired prerelease bootstrap incompatible with newly published feeds.
-    other_channels = [other for other in (*repo["channels"], "prerelease") if other != channel]
-    path = site / "apk" / channel / arch / (name + "-" + version + ".apk")
-    make_package(apk, root, path, {"name": name, "version": version, "arch": arch,
-        "license": "MIT", "description": f"apk-repository {channel} feed configuration",
-        "depends": " ".join("!apk-repository-" + other for other in other_channels)})
-    return {"name": name, "version": version, "channel": channel, "arch": arch,
-            "file": path.relative_to(site).as_posix()}
-
-
 def render_site(repo, site, manifest):
     def escape(value, quote=False):
         return html.escape(str(value), quote=quote)
 
-    def package_item(record):
-        sources = ''.join(' · <a href="{}">{}</a>'.format(
-            escape(a["file"], quote=True), escape(a["asset_name"])) for a in record.get("source_assets", []))
-        return ('<li><span class="name">{}</span><code>{}</code>'
-                '<span class="links"><a href="{}">APK</a> · <a href="{}">源码</a>{}</span></li>').format(
-                    escape(record["name"]), escape(record["version"]),
-                    escape(record["file"], quote=True), escape(record["source_archive"], quote=True), sources)
-
-    def arch_folder(channel, target):
+    groups = []
+    for target in repo["targets"]:
         arch = target["arch"]
-        records = [record for record in manifest["packages"]
-                   if record["channel"] == channel and record["arch"] == arch]
-        feed = f"apk/{channel}/{arch}/"
-        items = "".join(package_item(record) for record in records) or '<li class="empty">暂无软件包</li>'
-        return ('<details class="folder"><summary><span class="dir">{arch}</span>'
-                '<span class="meta">{abi}</span><span class="count">{count} 个包</span></summary>'
-                '<div class="children">'
-                '<p class="feed"><a href="{feed}packages.adb">packages.adb</a> · '
-                '<a href="{feed}manifest.json">manifest.json</a></p>'
-                '<ul class="files">{items}</ul></div></details>').format(
-                    arch=escape(arch), abi=escape(target["abi"]), count=len(records), feed=feed, items=items)
-
-    folders = []
-    for channel in repo["channels"]:
-        archs = "".join(arch_folder(channel, target) for target in repo["targets"])
-        count = sum(1 for record in manifest["packages"] if record["channel"] == channel)
-        folders.append(f'<details class="folder" open><summary><span class="dir">{escape(channel)}</span>'
-                       f'<span class="count">{count} 个包</span></summary><div class="children">{archs}</div></details>')
-    page = '''<!doctype html><html lang="zh-CN"><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>apk-repository</title>
+        feed = f"apk/latest/{arch}/"
+        links = [f'<li><a href="{feed}packages.adb">packages.adb</a></li>',
+                 f'<li><a href="{feed}manifest.json">manifest.json</a></li>']
+        records = sorted((r for r in manifest["packages"] if r["arch"] == arch), key=lambda r: r["name"])
+        for record in records:
+            filename = PurePosixPath(record["file"]).name
+            links.append('<li><a href="{}">{}</a> · <a href="{}">源码</a></li>'.format(
+                escape(record["file"], quote=True), escape(filename), escape(record["source_archive"], quote=True)))
+            for source in record.get("source_assets", []):
+                links.append('<li><a href="{}">{}</a></li>'.format(
+                    escape(source["file"], quote=True), escape(source["asset_name"])))
+        groups.append(f'<h2>{escape(arch)}</h2><ul>{"".join(links)}</ul>')
+    page = '''<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>apk-repository</title>
 <style>
-body{font:16px/1.6 system-ui,sans-serif;max-width:1000px;margin:48px auto;padding:0 24px;color:#18202b}
-code{background:#f3f5f7;padding:2px 5px;border-radius:4px}a{color:#1859ac}
-h2{margin-top:32px}
-details.folder{margin:8px 0}
-details.folder>summary{cursor:pointer;padding:7px 10px;border-radius:6px;background:#eef1f5;font-weight:600}
-details.folder details.folder>summary{background:#f6f8fa;font-weight:500}
-summary .meta{margin-left:8px;font-weight:400;color:#5b6675;font-size:14px}
-summary .count{margin-left:8px;font-weight:400;color:#7a8492;font-size:14px}
-.children{margin-left:18px;border-left:1px solid #dde2e8;padding-left:14px}
-p.feed,p.empty{margin:8px 0;color:#5b6675;font-size:14px}
-ul.files{list-style:none;margin:0;padding:0}
-ul.files li{display:flex;flex-wrap:wrap;gap:10px;align-items:baseline;padding:7px 4px;border-bottom:1px solid #eef1f4}
-ul.files .name{flex:1 1 220px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;word-break:break-all}
-ul.files .links{white-space:nowrap}
+body{font:16px/1.6 system-ui,sans-serif;max-width:960px;margin:40px auto;padding:0 16px;overflow-wrap:anywhere}
 </style>
-<h1>apk-repository</h1><p>OpenWrt 25.12 APK 软件源。stable 和 latest 通道分别保留当前版本。</p>
+<h1>apk-repository</h1>
+<p>OpenWrt 25.12 · latest</p>
 <p><a href="apk/apk-repository.pem">仓库公钥</a> · <a href="manifest.json">发布清单</a> · <a href="SHA256SUMS">SHA-256</a> · <a href="SHA256SUMS.sig">清单签名</a> · <a href="install.txt">安装说明</a></p>
 <p>公钥 SHA-256：<code>FINGERPRINT</code></p>
-<h2>软件包目录</h2>TREE
-<p>软件包来自其声明的上游，保留原始内容与许可证，仅追加仓库签名。</p></html>
+PACKAGES
+</html>
 '''
-    (site / "index.html").write_text(page.replace("FINGERPRINT", manifest["key_sha256"]).replace("TREE", "".join(folders)))
+    (site / "index.html").write_text(page.replace("FINGERPRINT", escape(manifest["key_sha256"]))
+                                     .replace("PACKAGES", "\n".join(groups)))
     (site / ".nojekyll").touch()
-    sections = ["apk-repository\n仅适用于已列出的 OpenWrt APK v3 架构。保留设备官方软件源以解析依赖。\n",
-                "先从维护者或本次可信 Actions 日志确认公钥 SHA-256：" + manifest["key_sha256"] + "\n"]
-    for feed in manifest["bootstrap"]:
-        selected = " ".join(record["name"] + "@lauyv" for record in manifest["packages"]
-                            if record["channel"] == feed["channel"] and record["arch"] == feed["arch"])
-        command = """\n{channel} / {arch}：
-wget -O /tmp/apk-repository.pem '{base}/apk/apk-repository.pem'
-sha256sum /tmp/apk-repository.pem
-# 确认上述指纹匹配后执行：
-mkdir -p /etc/apk/keys
-cp /tmp/apk-repository.pem /etc/apk/keys/apk-repository.pem
-wget -O /tmp/apk-repository-feed.apk '{base}/{file}'
-apk add /tmp/apk-repository-feed.apk
-apk update
-apk add -u {selected}
-""".format(base=repo["base_url"], selected=selected, **feed)
-        sections.append(command)
-    sections.append(r"""
-移除订阅（保留应用包）：
-先备份 world 并清理本仓库标签，再移除配置包和专用文件。
-(
-  set -eu
-  cp -p /etc/apk/world /etc/apk/world.before-apk-repository-removal
-  sed -i -E 's/@lauyv([<>=~]|$)/\1/g' /etc/apk/world
-  for package in apk-repository-stable apk-repository-latest apk-repository-prerelease; do
-    if apk info -e "$package" >/dev/null 2>&1; then
-      apk del "$package"
-    fi
-  done
-  if [ -f /etc/apk/repositories.d/customfeeds.list ]; then
-    cp -p /etc/apk/repositories.d/customfeeds.list /etc/apk/repositories.d/customfeeds.list.bak
-    sed -i '/^[[:space:]]*@lauyv[[:space:]]/d' /etc/apk/repositories.d/customfeeds.list
-  fi
-  rm -f /etc/apk/repositories.d/apk-repository.list
-  rm -f /etc/apk/keys/apk-repository.pem
-)
-保留应用包条目、版本约束及其他仓库标签；后续 APK 操作按剩余软件源解析版本。
-仅启用一个通道。切换前完整执行上述移除步骤，再按新通道步骤安装，重新添加仓库标签。
-切回稳定源不会自动降级已安装的较新预发布包。不执行全系统 apk upgrade。
-""")
-    (site / "install.txt").write_text("".join(sections))
+    instructions = ["apk-repository — OpenWrt 25.12 / latest\n",
+                    "公钥 SHA-256：" + manifest["key_sha256"] + "\n",
+                    "先从可信渠道核对公钥指纹，再安装公钥并添加对应架构的软件源。\n",
+                    repo["base_url"] + "/apk/apk-repository.pem\n"]
+    for target in repo["targets"]:
+        instructions.append(f"{target['arch']}: {repo['base_url']}/apk/latest/{target['arch']}/packages.adb\n")
+    (site / "install.txt").write_text("".join(instructions))
 
 
-def sign(root, apk, unsigned, output, private_key, previous=None):
+def sign(root, apk, unsigned, output, private_key):
     repo, packages = load(root)
     check_tool(apk, repo["apk_tools"]["version"])
     unsigned, output, private_key = Path(unsigned).resolve(), Path(output).resolve(), Path(private_key).resolve()
@@ -242,54 +162,32 @@ def sign(root, apk, unsigned, output, private_key, previous=None):
         site = work / "site"
         # Copy only explicitly referenced input artifacts, never arbitrary build output.
         site.mkdir()
-        for record in original["packages"]:
-            for relative in (record["file"], record["source_archive"],
-                             *(a["file"] for a in record.get("source_assets", []))):
-                destination = site / relative
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(child(unsigned, relative), destination)
+        files = {relative for record in original["packages"]
+                 for relative in (record["file"], record["source_archive"],
+                                  *(a["file"] for a in record.get("source_assets", [])))}
+        for relative in sorted(files):
+            destination = site / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(child(unsigned, relative), destination)
         public = site / "apk/apk-repository.pem"
         run(["openssl", "pkey", "-in", private_key, "-pubout", "-out", public])
         public.chmod(0o644)
-        keys = work / "keys"
-        keys.mkdir()
-        shutil.copyfile(public, keys / public.name)
-        cached_records = previous_records(previous, public, repo)
-        package_by_name = {p["name"]: p for p in packages}
-        target_by_arch = {t["arch"]: t for t in repo["targets"]}
         manifest = original
         manifest["key_sha256"] = sha256(public)
-        manifest["bootstrap"] = []
-        version = datetime.datetime.now(datetime.UTC).strftime("%Y%m%d%H%M%S") + "-r0"
-        for channel in repo["channels"]:
-            for target in repo["targets"]:
-                manifest["bootstrap"].append(bootstrap(apk, repo, site, work, channel, target["arch"], version, Path(root) / "LICENSE"))
-        reused = 0
-        for record in manifest["packages"] + manifest["bootstrap"]:
+        for record in manifest["packages"]:
             path = child(site, record["file"])
-            if record in manifest["packages"]:
-                package = package_by_name[record["name"]]
-                record["reuse_fingerprint"] = fingerprint(repo, package, target_by_arch[record["arch"]])
-                if reuse_apk(apk, previous, cached_records, record, path, package, keys):
-                    record["sha256"] = sha256(path)
-                    reused += 1
-                    print("Reused signed APK: " + record["file"])
-                    continue
             before = metadata(apk, path)
             run([apk, "adbsign", "--allow-untrusted", "--sign-key", private_key, path])
             require(metadata(apk, path) == before, "signing changed package metadata")
-            run([apk, "verify", "--keys-dir", keys, path])
             record["sha256"] = sha256(path)
         manifest["indexes"] = []
-        for channel in repo["channels"]:
-            for target in repo["targets"]:
-                feed = site / "apk" / channel / target["arch"]
-                index(apk, feed, private_key)
-                path = feed / "packages.adb"
-                run([apk, "verify", "--keys-dir", keys, path])
-                records = [r for r in manifest["packages"] if r["channel"] == channel and r["arch"] == target["arch"]]
-                write_json(feed / "manifest.json", {"channel": channel, "arch": target["arch"], "packages": records})
-                manifest["indexes"].append({"file": path.relative_to(site).as_posix(), "sha256": sha256(path)})
+        for target in repo["targets"]:
+            feed = site / "apk" / "latest" / target["arch"]
+            index(apk, feed, private_key)
+            path = feed / "packages.adb"
+            records = [r for r in manifest["packages"] if r["arch"] == target["arch"]]
+            write_json(feed / "manifest.json", {"channel": "latest", "arch": target["arch"], "packages": records})
+            manifest["indexes"].append({"file": path.relative_to(site).as_posix(), "sha256": sha256(path)})
         write_json(site / "manifest.json", manifest)
         render_site(repo, site, manifest)
         checksum_file = site / "SHA256SUMS"
@@ -297,7 +195,6 @@ def sign(root, apk, unsigned, output, private_key, previous=None):
                                          for p in sorted(site.rglob("*")) if p.is_file()))
         run(["openssl", "dgst", "-sha256", "-sign", private_key, "-out", site / "SHA256SUMS.sig", checksum_file])
         site.rename(output)
-    print(f"Signed APK reuse: {reused}/{len(manifest['packages'])} upstream packages")
     print("Public key SHA-256: " + manifest["key_sha256"])
 
 
@@ -321,19 +218,19 @@ def verify(root, apk, site):
         keys = Path(temporary)
         shutil.copyfile(public, keys / public.name)
         check_records(repo, packages, manifest, site, apk, keys)
-        expected_apks = {r["file"] for r in manifest["packages"] + manifest["bootstrap"]}
+        expected_apks = {r["file"] for r in manifest["packages"]}
         require({p.relative_to(site).as_posix() for p in site.rglob("*.apk")} == expected_apks, "unexpected or historical APK")
-        expected_indexes = {"apk/{}/{}/packages.adb".format(c, t["arch"]) for c in repo["channels"] for t in repo["targets"]}
+        expected_indexes = {f"apk/latest/{t['arch']}/packages.adb" for t in repo["targets"]}
         require({r["file"] for r in manifest["indexes"]} == expected_indexes, "missing feed index")
-        for record in manifest["indexes"] + manifest["bootstrap"]:
+        for record in manifest["indexes"]:
             path = child(site, record["file"])
             require(sha256(path) == record["sha256"], "artifact checksum mismatch")
             run([apk, "verify", "--keys-dir", keys, path])
         for relative in expected_indexes:
             data = json.loads(run([apk, "adbdump", "--format", "json", site / relative], capture_output=True).stdout)
-            expected = {(r["name"], r["version"]) for r in manifest["packages"] + manifest["bootstrap"]
+            expected = {(r["name"], r["version"]) for r in manifest["packages"]
                         if Path(r["file"]).parent == Path(relative).parent}
             entries = data.get("packages", [])
             require(len(entries) == len(expected) and {(p["name"], p["version"]) for p in entries} == expected,
                     "index contains missing, duplicate or historical packages")
-    print("Signed site verified: only current configured-channel packages are present.")
+    print("Signed site verified: only current latest packages are present.")

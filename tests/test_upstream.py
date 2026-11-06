@@ -24,31 +24,23 @@ class UpstreamTests(unittest.TestCase):
         return {"id": int(published), "tag_name": tag, "prerelease": prerelease,
                 "published_at": published, "draft": draft}
 
-    def test_stable_excludes_prereleases(self):
-        releases = [self.release("v1.2.0", False, "2"), self.release("v1.3.0-beta.1", True, "1"),
-                    self.release("v1.4.0", False, "3", True)]
-        self.assertEqual(select_release(releases, "stable")["tag_name"], "v1.2.0")
-
-    def test_only_latest_eligible_release_selected(self):
-        releases = [self.release("v1.1.0", False, "1"), self.release("v1.2.0", False, "2")]
-        self.assertEqual(select_release(releases, "stable")["tag_name"], "v1.2.0")
-
     def test_latest_ignores_release_channel_and_drafts(self):
-        releases = [self.release("v1.2.0", False, "2"), self.release("v1.3.0-beta.1", True, "3"),
-                    self.release("v1.4.0", False, "4", True)]
-        self.assertEqual(select_release(releases, "latest")["tag_name"], "v1.3.0-beta.1")
-        releases.append(self.release("v1.3.0", False, "5"))
-        self.assertEqual(select_release(releases, "latest")["tag_name"], "v1.3.0")
+        releases = [self.release("v1.4.0", False, "4", True), self.release("v1.3.0-beta.1", True, "3"),
+                    self.release("v1.2.0", False, "2")]
+        self.assertEqual(select_release(releases)["tag_name"], "v1.3.0-beta.1")
+        releases.insert(0, self.release("v1.3.0", False, "5"))
+        self.assertEqual(select_release(releases)["tag_name"], "v1.3.0")
 
-    def test_latest_scans_all_release_pages(self):
+    def test_latest_reads_only_current_release_page(self):
         older = self.release("v1.2.0", False, "2")
         newer = self.release("v1.3.0-beta.1", True, "3")
         with patch("apk_repository.upstream.api_json", side_effect=[
-            [older] * 10, [newer], {"object": {"type": "commit", "sha": "a" * 40}},
+            [newer, older], {"object": {"type": "commit", "sha": "a" * 40}},
         ]) as api:
-            release, commit = resolve_release("owner/tool", "latest")
+            release, commit = resolve_release("owner/tool")
         self.assertEqual((release["tag_name"], commit), ("v1.3.0-beta.1", "a" * 40))
-        self.assertEqual(api.call_args_list[1].args[0], "repos/owner/tool/releases?per_page=10&page=2")
+        self.assertEqual(api.call_args_list[0].args[0], "repos/owner/tool/releases?per_page=10")
+        self.assertEqual(api.call_count, 2)
 
     def test_annotated_tag_resolves_to_commit(self):
         with patch("apk_repository.upstream.api_json", side_effect=[
@@ -65,15 +57,29 @@ class UpstreamTests(unittest.TestCase):
             self.assertEqual(api_json("repos/owner/tool/releases"), {"ok": True})
         self.assertEqual(opened.call_count, 2)
 
-    def test_removed_prerelease_channel_is_rejected(self):
-        with self.assertRaises(ConfigError):
-            select_release([self.release("v1.2.0", False, "1")], "prerelease")
-
     def test_apk_prerelease_version_mapping(self):
         self.assertEqual(version_parts("v1.14.0-beta.8"), ("1.14.0-beta.8", "1.14.0_beta8"))
         self.assertEqual(version_parts("1.14.0-rc.3"), ("1.14.0-rc.3", "1.14.0_rc3"))
         with self.assertRaises(ConfigError):
             version_parts("v1.2.3;echo bad")
+
+    def test_revisioned_release_versions(self):
+        for tag, upstream, apk in (("v0.1.0-beta.5-r3", "0.1.0-beta.5", "0.1.0_beta5"),
+                                   ("1.2.3-r0", "1.2.3", "1.2.3")):
+            self.assertEqual(version_parts(tag), (upstream, apk))
+            self.assertEqual(select_release([self.release(tag, True, "1")])["tag_name"], tag)
+        for tag in ("v1.2.3-r01", "v1.2.3-r-1", "v1.2.3-r", "v1.2.3-r2-extra"):
+            with self.assertRaises(ConfigError):
+                version_parts(tag)
+
+    def test_revisioned_tag_must_match_apk_revision(self):
+        tag = "v1.2.3-beta.4-r3"
+        pattern = "tool-{apk_version}-r{revision}.apk"
+        self.assertEqual(package_version(tag, pattern, "tool-1.2.3_beta4-r3.apk"), "1.2.3_beta4-r3")
+        with self.assertRaisesRegex(ConfigError, "revision does not match"):
+            package_version(tag, pattern, "tool-1.2.3_beta4-r2.apk")
+        with self.assertRaisesRegex(ConfigError, "revision does not match"):
+            package_version(tag, "tool-{version}.apk", "tool-1.2.3-beta.4.apk", "1.2.3_beta4-r2")
 
     def asset_release(self):
         return {"tag_name": "v1.2.3", "assets": [{"id": 1, "name": "tool_1.2.3_openwrt_x86_64.apk",
@@ -93,7 +99,7 @@ class UpstreamTests(unittest.TestCase):
             "https://github.com/owner/tool/releases/download/v1.2.3/tool_1.2.3-r5.apk")
         pattern = "tool_{version}-r{revision}.apk"
         asset = select_asset(release, "owner/tool", pattern)
-        self.assertEqual(package_version("v1.2.3", pattern, asset["name"], None), "1.2.3-r5")
+        self.assertEqual(package_version("v1.2.3", pattern, asset["name"]), "1.2.3-r5")
         release["assets"].append(dict(asset, name="tool_1.2.3-r4.apk"))
         with self.assertRaisesRegex(ConfigError, "exactly one asset"):
             select_asset(release, "owner/tool", pattern)
@@ -101,25 +107,25 @@ class UpstreamTests(unittest.TestCase):
     def test_revision_can_come_from_apk_metadata_without_filename_suffix(self):
         pattern = "tool_{version}_openwrt_x86_64.apk"
         name = "tool_1.2.3_openwrt_x86_64.apk"
-        self.assertEqual(package_version("v1.2.3", pattern, name, None, "1.2.3-r0"), "1.2.3-r0")
+        self.assertEqual(package_version("v1.2.3", pattern, name, "1.2.3-r0"), "1.2.3-r0")
         with self.assertRaisesRegex(ConfigError, "does not match Release tag"):
-            package_version("v1.2.3", pattern, name, None, "1.2.4-r0")
+            package_version("v1.2.3", pattern, name, "1.2.4-r0")
 
     def test_honk_architecture_assets_use_apk_prerelease_version(self):
         for suffix in ("alpha", "beta", "rc"):
             for arch in ("aarch64_generic", "x86_64"):
                 release = self.asset_release()
-                release["tag_name"] = f"v1.2.3-{suffix}.4"
+                release["tag_name"] = f"v1.2.3-{suffix}.4-r2"
                 asset = release["assets"][0]
                 asset["name"] = f"luci-app-honk-1.2.3_{suffix}4-r2-{arch}.apk"
                 asset["browser_download_url"] = (
                     f"https://github.com/owner/tool/releases/download/{release['tag_name']}/{asset['name']}")
                 pattern = f"luci-app-honk-{{apk_version}}-r{{revision}}-{arch}.apk"
                 self.assertEqual(select_asset(release, "owner/tool", pattern), asset)
-                self.assertEqual(package_version(release["tag_name"], pattern, asset["name"], None),
+                self.assertEqual(package_version(release["tag_name"], pattern, asset["name"]),
                                  f"1.2.3_{suffix}4-r2")
                 with self.assertRaisesRegex(ConfigError, "metadata version mismatch"):
-                    package_version(release["tag_name"], pattern, asset["name"], None, "1.2.3-r2")
+                    package_version(release["tag_name"], pattern, asset["name"], "1.2.3-r2")
 
     def test_source_selection_requires_unique_verified_release_assets(self):
         release = self.asset_release()
@@ -128,16 +134,28 @@ class UpstreamTests(unittest.TestCase):
         asset["browser_download_url"] = (
             f"https://github.com/owner/tool/releases/download/v1.2.3/{asset['name']}")
         self.assertEqual(select_source_assets(release, "owner/tool", ["doona-source-*.tar.gz"]), [asset])
-        for patterns in (["honk-source-{tag}.tar.gz"], ["doona-source-*.tar.gz"] * 2):
+        for patterns in (["honk-source-v9.9.9.tar.gz"], ["doona-source-*.tar.gz"] * 2):
             with self.assertRaises(ConfigError):
                 select_source_assets(release, "owner/tool", patterns)
         release["assets"].append(dict(asset, name="doona-source-v2.0.0.tar.gz"))
         with self.assertRaisesRegex(ConfigError, "exactly one source"):
             select_source_assets(release, "owner/tool", ["doona-source-*.tar.gz"])
+
         release["assets"].pop()
         asset["digest"] = None
         with self.assertRaisesRegex(ConfigError, "SHA-256"):
             select_source_assets(release, "owner/tool", ["doona-source-*.tar.gz"])
+
+    def test_revisioned_release_selects_core_source_without_revision(self):
+        release = self.asset_release()
+        release["tag_name"] = "v1.2.3-beta.4-r3"
+        asset = release["assets"][0]
+        asset["name"] = "honk-source-v1.2.3-beta.4.tar.gz"
+        asset["browser_download_url"] = (
+            f"https://github.com/owner/tool/releases/download/{release['tag_name']}/{asset['name']}")
+        self.assertEqual(select_source_assets(release, "owner/tool", ["honk-source-v{version}.tar.gz"]), [asset])
+        with self.assertRaisesRegex(ConfigError, "exactly one source"):
+            select_source_assets(release, "owner/tool", ["honk-source-v9.9.9.tar.gz"])
 
     def test_digest_and_provenance_are_required(self):
         release = self.asset_release()

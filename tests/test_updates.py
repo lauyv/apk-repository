@@ -14,11 +14,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class UpdateTests(unittest.TestCase):
     def sources(self, patterns, digest="a" * 64):
-        return [{"id": i + 20, "name": p.replace("{tag}", "v1.0.0").replace("*", "v1.0.0"),
+        return [{"id": i + 20, "name": p.replace("{version}", "1.0.0").replace("*", "v1.0.0"),
                  "digest": "sha256:" + digest} for i, p in enumerate(patterns)]
 
     def check(self, published=None, error=None, digest="a" * 64):
-        def release(source, channel):
+        def release(source):
             return {"id": 1, "tag_name": "v1.0.0", "prerelease": False}, "b" * 40
 
         with (
@@ -37,11 +37,11 @@ class UpdateTests(unittest.TestCase):
     def manifest(self):
         repo, packages = load(ROOT)
         records = []
-        for channel, target, pkg in itertools.product(repo["channels"], repo["targets"], packages):
+        for target, pkg in itertools.product(repo["targets"], packages):
             arch = target["arch"]
-            if pkg["enabled"] and channel in pkg["channels"] and arch in pkg["architectures"]:
+            if arch in pkg["architectures"]:
                 pattern = pkg["architectures"][arch]["asset_pattern"]
-                records.append({"channel": channel, "arch": arch, "name": pkg["name"],
+                records.append({"channel": "latest", "arch": arch, "name": pkg["name"],
                     "source": pkg["source"],
                     "source_commit": "b" * 40, "release_id": 1, "release_tag": "v1.0.0",
                     "upstream_prerelease": False, "asset_id": 2,

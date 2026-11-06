@@ -41,7 +41,7 @@ fi
 printf '%s  %s\n' "$image_sha256" "$rootfs" | sha256sum -c -
 docker import "$rootfs" apk-repository-openwrt:check
 
-uv run --locked python -m http.server 8765 --bind 127.0.0.1 --directory "$SITE" > "$WORK/http.log" 2>&1 &
+python3 -m http.server 8765 --bind 127.0.0.1 --directory "$SITE" > "$WORK/http.log" 2>&1 &
 server_pid=$!
 for ((attempt = 1; attempt <= 20; attempt++)); do
   if curl --fail --silent http://127.0.0.1:8765/manifest.json -o /dev/null; then break; fi
@@ -52,109 +52,45 @@ if ! curl --fail --silent --show-error http://127.0.0.1:8765/manifest.json -o /d
   exit 1
 fi
 
-for channel in stable latest; do
-  echo "Checking installation: $ARCH / $channel"
-  uv run --locked python - "$SITE/manifest.json" "$channel" "$WORK" "$ARCH" > "$WORK/versions" <<'PY'
+echo "Checking installation: $ARCH / latest"
+python3 - "$SITE/manifest.json" "$WORK" "$ARCH" > "$WORK/versions" <<'PY'
 import json, sys
 from pathlib import Path
 manifest = json.load(open(sys.argv[1]))
-records = [p for p in manifest["packages"] if p["channel"] == sys.argv[2] and p["arch"] == sys.argv[4]]
+records = [p for p in manifest["packages"] if p["arch"] == sys.argv[3]]
 assert records, "No packages for installation check"
-Path(sys.argv[3], "install-specs").write_text("".join(p["name"] + "@lauyv=" + p["version"] + "\n" for p in records))
-Path(sys.argv[3], "package-names").write_text("".join(p["name"] + "\n" for p in records))
+Path(sys.argv[2], "install-specs").write_text("".join(p["name"] + "@lauyv=" + p["version"] + "\n" for p in records))
+Path(sys.argv[2], "package-names").write_text("".join(p["name"] + "\n" for p in records))
 core = next((p for p in records if p["name"] == "sing-box"), None)
 print(core["release_tag"].removeprefix("v") if core else "")
-record = next(p for p in manifest["bootstrap"] if p["channel"] == sys.argv[2] and p["arch"] == sys.argv[4])
-print(record["file"])
+
 PY
-  mapfile -t versions < "$WORK/versions"
-  docker run --rm --network host -v "$SITE:/feed:ro" -v "$WORK:/checks:ro" \
-    -e "ARCH=$ARCH" -e "CHANNEL=$channel" -e "CORE_UPSTREAM=${versions[0]}" -e "BOOTSTRAP=${versions[1]}" \
-    apk-repository-openwrt:check /bin/sh -eu -c '
-      actual_arch=$(cat /etc/apk/arch)
-      if [ "$actual_arch" != "$ARCH" ]; then
-        echo "OpenWrt package architecture mismatch: expected=$ARCH actual=$actual_arch" >&2
-        exit 1
-      fi
-      mkdir -p /etc/apk/keys /etc/apk/repositories.d /var/lock
-      cp /feed/apk/apk-repository.pem /etc/apk/keys/apk-repository.pem
-      apk add --no-scripts "/feed/$BOOTSTRAP"
-      test -s /etc/apk/repositories.d/apk-repository.list
-      printf "@lauyv http://127.0.0.1:8765/apk/%s/%s/packages.adb\n" "$CHANNEL" "$ARCH" > /etc/apk/repositories.d/apk-repository.list
-      apk update
-      set --
-      while IFS= read -r spec; do set -- "$@" "$spec"; done < /checks/install-specs
-      apk add --no-scripts "$@"
-      if [ -n "$CORE_UPSTREAM" ]; then
-        sing-box version | head -n 1 | grep -F -x "sing-box version $CORE_UPSTREAM"
-        test -x /etc/init.d/sing-box
-        test -f /etc/config/sing-box
-      fi
-      if grep -q -x luci-app-sing-box /checks/package-names; then
-        test -x /usr/libexec/rpcd/luci.sing-box
-      fi
-      set --
-      while IFS= read -r name; do set -- "$@" "$name"; done < /checks/package-names
-      apk del --no-scripts "$@" "apk-repository-$CHANNEL"
-      test -s /etc/apk/repositories.d/distfeeds.list
-    '
-done
-
-# Compare stable and latest for real upgrades, without publishing historical APKs.
-uv run --locked python - "$SITE/manifest.json" "$ARCH" "$TOOLS_DIR/apk" > "$WORK/upgrades" <<'PY'
-import json
-import subprocess
-import sys
-
-with open(sys.argv[1]) as stream:
-    manifest = json.load(stream)
-packages = {}
-for record in manifest["packages"]:
-    if record["arch"] == sys.argv[2]:
-        packages.setdefault(record["name"], {})[record["channel"]] = record
-for name, channels in packages.items():
-    if set(channels) != {"stable", "latest"}:
-        print(f"SKIP upgrade {name}: only one channel", file=sys.stderr)
-        continue
-    low, high = channels["stable"], channels["latest"]
-    comparison = subprocess.run([sys.argv[3], "version", "-t", low["version"], high["version"]],
-                                check=True, capture_output=True, text=True).stdout.strip()
-    if comparison == "=":
-        print(f"SKIP upgrade {name}: channels contain the same version", file=sys.stderr)
-        continue
-    if comparison == ">":
-        low, high = high, low
-    elif comparison != "<":
-        raise ValueError("Unexpected APK version comparison: " + comparison)
-    print(name, low["channel"], low["version"], high["channel"], high["version"])
-PY
-
-while read -r package old_channel old_version new_channel new_version; do
-  echo "Checking upgrade: $ARCH / $package / $old_version -> $new_version"
-  docker run --rm --network host -v "$SITE:/feed:ro" \
-    -e "ARCH=$ARCH" -e "PACKAGE=$package" \
-    -e "OLD_CHANNEL=$old_channel" -e "OLD_VERSION=$old_version" \
-    -e "NEW_CHANNEL=$new_channel" -e "NEW_VERSION=$new_version" \
-    apk-repository-openwrt:check /bin/sh -eu -c '
-      actual_arch=$(cat /etc/apk/arch)
-      if [ "$actual_arch" != "$ARCH" ]; then
-        echo "OpenWrt package architecture mismatch: expected=$ARCH actual=$actual_arch" >&2
-        exit 1
-      fi
-      mkdir -p /etc/apk/keys /etc/apk/repositories.d /var/lock
-      cp /feed/apk/apk-repository.pem /etc/apk/keys/apk-repository.pem
-      printf "@lauyv http://127.0.0.1:8765/apk/%s/%s/packages.adb\n" "$OLD_CHANNEL" "$ARCH" > /etc/apk/repositories.d/customfeeds.list
-      apk update
-      apk add --no-scripts "$PACKAGE@lauyv=$OLD_VERSION"
-      apk info -e "$PACKAGE=$OLD_VERSION"
-      printf "@lauyv http://127.0.0.1:8765/apk/%s/%s/packages.adb\n" "$NEW_CHANNEL" "$ARCH" > /etc/apk/repositories.d/customfeeds.list
-      apk update
-      apk add --no-scripts -u "$PACKAGE@lauyv=$NEW_VERSION"
-      apk info -e "$PACKAGE=$NEW_VERSION"
-      if apk info -e "$PACKAGE=$OLD_VERSION"; then
-        echo "Old version remains installed" >&2
-        exit 1
-      fi
-      echo "Upgraded $PACKAGE: $OLD_VERSION -> $NEW_VERSION ($ARCH)"
-    '
-done < "$WORK/upgrades"
+core_upstream=$(cat "$WORK/versions")
+docker run --rm --network host -v "$SITE:/feed:ro" -v "$WORK:/checks:ro" \
+  -e "ARCH=$ARCH" -e "CORE_UPSTREAM=$core_upstream" \
+  apk-repository-openwrt:check /bin/sh -eu -c '
+    actual_arch=$(cat /etc/apk/arch)
+    if [ "$actual_arch" != "$ARCH" ]; then
+      echo "OpenWrt package architecture mismatch: expected=$ARCH actual=$actual_arch" >&2
+      exit 1
+    fi
+    mkdir -p /etc/apk/keys /etc/apk/repositories.d /var/lock
+    cp /feed/apk/apk-repository.pem /etc/apk/keys/apk-repository.pem
+    printf "@lauyv http://127.0.0.1:8765/apk/latest/%s/packages.adb\n" "$ARCH" > /etc/apk/repositories.d/apk-repository.list
+    apk update
+    set --
+    while IFS= read -r spec; do set -- "$@" "$spec"; done < /checks/install-specs
+    apk add --no-scripts "$@"
+    if [ -n "$CORE_UPSTREAM" ]; then
+      sing-box version | head -n 1 | grep -F -x "sing-box version $CORE_UPSTREAM"
+      test -x /etc/init.d/sing-box
+      test -f /etc/config/sing-box
+    fi
+    if grep -q -x luci-app-sing-box /checks/package-names; then
+      test -x /usr/libexec/rpcd/luci.sing-box
+    fi
+    set --
+    while IFS= read -r name; do set -- "$@" "$name"; done < /checks/package-names
+    apk del --no-scripts "$@"
+    test -s /etc/apk/repositories.d/distfeeds.list
+  '

@@ -12,12 +12,10 @@ def main():
     parser = argparse.ArgumentParser(description="Synchronize upstream OpenWrt APKs and publish signed APK v3 feeds.")
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parent.parent)
     commands = parser.add_subparsers(dest="command", required=True)
-    commands.add_parser("validate", help="validate all registered packages, including disabled ones")
+    commands.add_parser("validate", help="validate package configuration")
     commands.add_parser("check-updates", help="compare upstream releases with the published manifest")
-    preview = commands.add_parser("plan", help="print a JSON plan; does not download, build or publish")
-    preview.add_argument("--channel", choices=("stable", "latest"), default="latest")
-    preview.add_argument("--include-disabled", action="store_true", help="also show candidate packages and blockers")
-    assemble = commands.add_parser("build", help="download and validate APKs for all configured channels")
+    commands.add_parser("plan", help="print the latest feed plan")
+    assemble = commands.add_parser("build", help="download and validate APKs for latest")
     assemble.add_argument("--apk", required=True, type=Path)
     assemble.add_argument("--output", required=True, type=Path)
     assemble.add_argument("--cache", type=Path, help="reuse SHA-256-verified upstream APK downloads")
@@ -26,7 +24,6 @@ def main():
     signing.add_argument("--input", required=True, type=Path)
     signing.add_argument("--output", required=True, type=Path)
     signing.add_argument("--key", required=True, type=Path)
-    signing.add_argument("--previous", type=Path, help="reuse compatible authenticated signed APKs")
     verification = commands.add_parser("verify", help="verify site signatures, checksums and indexes")
     verification.add_argument("--apk", required=True, type=Path)
     verification.add_argument("--site", required=True, type=Path)
@@ -34,10 +31,10 @@ def main():
     try:
         repo, packages = load(args.root)
         if args.command == "validate":
-            print("Configuration valid: {} packages, {} enabled, {} targets".format(
-                len(packages), sum(p["enabled"] for p in packages), len(repo["targets"])))
+            print("Configuration valid: {} packages, {} targets".format(
+                len(packages), len(repo["targets"])))
         elif args.command == "plan":
-            print(json.dumps(plan(repo, packages, args.channel, args.include_disabled), indent=2))
+            print(json.dumps(plan(repo, packages), indent=2))
         elif args.command == "check-updates":
             from .updates import check_updates
             check_updates(args.root)
@@ -46,7 +43,7 @@ def main():
             build(args.root, args.apk.resolve(), args.output, args.cache)
         elif args.command == "sign":
             from .publish import sign
-            sign(args.root, args.apk.resolve(), args.input, args.output, args.key, args.previous)
+            sign(args.root, args.apk.resolve(), args.input, args.output, args.key)
         elif args.command == "verify":
             from .publish import verify
             verify(args.root, args.apk.resolve(), args.site)

@@ -31,30 +31,23 @@ def check_updates(root):
             raise
 
     records = []
-    resolutions = {}
-    for channel in repo["channels"]:
-        for pkg in packages:
-            if not pkg["enabled"] or channel not in pkg["channels"]:
+    for pkg in packages:
+        release, commit = resolve_release(pkg["source"])
+        source_assets = [{"asset_id": a["id"], "asset_name": a["name"], "sha256": a["digest"].split(":", 1)[1]}
+                         for a in select_source_assets(release, pkg["source"], pkg.get("source_assets", []))]
+        for target in repo["targets"]:
+            arch = target["arch"]
+            if arch not in pkg["architectures"]:
                 continue
-            key = (pkg["source"], channel)
-            if key not in resolutions:
-                resolutions[key] = resolve_release(pkg["source"], channel)
-            release, commit = resolutions[key]
-            source_assets = [{"asset_id": a["id"], "asset_name": a["name"], "sha256": a["digest"].split(":", 1)[1]}
-                             for a in select_source_assets(release, pkg["source"], pkg.get("source_assets", []))]
-            for target in repo["targets"]:
-                arch = target["arch"]
-                if arch not in pkg["architectures"]:
-                    continue
-                pattern = pkg["architectures"][arch]["asset_pattern"]
-                asset = select_asset(release, pkg["source"], pattern)
-                records.append({"channel": channel, "arch": arch, "name": pkg["name"],
-                    "source": pkg["source"],
-                    "source_commit": commit, "release_id": release["id"],
-                    "release_tag": release["tag_name"], "upstream_prerelease": release["prerelease"],
-                    "asset_id": asset["id"], "asset_name": asset["name"],
-                    "asset_sha256": asset["digest"].split(":", 1)[1], "source_assets": source_assets})
-    require(records, "no enabled packages")
+            pattern = pkg["architectures"][arch]["asset_pattern"]
+            asset = select_asset(release, pkg["source"], pattern)
+            records.append({"channel": "latest", "arch": arch, "name": pkg["name"],
+                "source": pkg["source"],
+                "source_commit": commit, "release_id": release["id"],
+                "release_tag": release["tag_name"], "upstream_prerelease": release["prerelease"],
+                "asset_id": asset["id"], "asset_name": asset["name"],
+                "asset_sha256": asset["digest"].split(":", 1)[1], "source_assets": source_assets})
+    require(records, "no packages")
     changed = current is None or identities(records) != identities(current["packages"])
     message = "Upstream changes detected; publication required." if changed else "No upstream changes; publication skipped."
     print(message)

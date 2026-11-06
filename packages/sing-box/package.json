@@ -1,11 +1,7 @@
 {
   "schema_version": 1,
   "name": "sing-box",
-  "enabled": true,
   "source": "SagerNet/sing-box",
-  "method": "sync-apk",
-  "channels": ["stable", "latest"],
-  "revision": null,
   "architectures": {
     "aarch64_generic": {
       "asset_pattern": "sing-box_{version}_openwrt_aarch64_generic.apk",

@@ -17,10 +17,6 @@ class ConfigTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.repo, self.packages = copy.deepcopy(load(ROOT))
-        for target in self.repo["targets"]:
-            target["abi"] = None
-        for pkg in self.packages:
-            pkg["enabled"] = False
         self.save()
 
     def save(self):
@@ -35,54 +31,28 @@ class ConfigTests(unittest.TestCase):
         with self.assertRaisesRegex(ConfigError, message):
             load(self.root)
 
-    def test_default_plan_never_includes_disabled_packages(self):
-        self.assertEqual(plan(self.repo, self.packages, "stable")["jobs"], [])
-
-    def test_candidate_plan_exposes_blockers_and_generic_feed_url(self):
-        result = plan(self.repo, self.packages, "latest", True)
-        self.assertTrue(result["planning_only"])
-        self.assertEqual(len(result["jobs"]), sum(len(pkg["architectures"]) for pkg in self.packages))
+    def test_plan_lists_all_current_packages_on_both_architectures(self):
+        result = plan(self.repo, self.packages)
+        self.assertEqual(result["channel"], "latest")
+        self.assertEqual(len(result["jobs"]), 8)
         for job in result["jobs"]:
-            self.assertIn("target-abi-required", job["blockers"])
             self.assertEqual(job["index_url"], f"https://lauyv.github.io/apk-repository/apk/latest/{job['arch']}/packages.adb")
 
-    def test_new_package_needs_no_planner_changes(self):
-        pkg = copy.deepcopy(self.packages[1])
-        pkg.update(name="example-tool", source="example/tool", enabled=True,
-                   channels=["stable", "latest"])
-        pkg["architectures"] = {"x86_64": pkg["architectures"]["x86_64"]}
-        pkg["architectures"]["x86_64"].update(asset_pattern="tool-{version}-x86_64.apk")
-        self.repo["targets"] = [{"arch": "x86_64", "abi": "test-abi"}]
-        for configured in self.packages:
-            configured["architectures"] = {"x86_64": configured["architectures"]["x86_64"]}
-        self.repo["packages"].append(pkg["name"])
-        self.packages.append(pkg)
-        self.save()
-        repo, packages = load(self.root)
-        jobs = plan(repo, packages, "stable")["jobs"]
-        self.assertEqual([j["package"] for j in jobs], ["example-tool"])
-        self.assertEqual(jobs[0]["blockers"], [])
-        self.assertEqual(len(plan(repo, packages, "latest")["jobs"]), 1)
-
-    def test_empty_channel_architecture_feed_is_rejected(self):
-        self.packages[0].update(enabled=True, channels=["stable"])
-        for target in self.repo["targets"]:
-            target["abi"] = "openwrt-25.12"
-        self.reject("empty feed: latest/")
-
-    def test_honk_is_planned_only_for_latest_on_both_architectures(self):
-        repo, packages = load(ROOT)
-        self.assertNotIn("luci-app-honk", [job["package"] for job in plan(repo, packages, "stable")["jobs"]])
-        jobs = [job for job in plan(repo, packages, "latest")["jobs"] if job["package"] == "luci-app-honk"]
-        self.assertEqual({job["arch"] for job in jobs}, {"x86_64", "aarch64_generic"})
-        self.assertTrue(all(job["package_arch"] == job["arch"] and not job["blockers"] for job in jobs))
+    def test_empty_architecture_feed_is_rejected(self):
+        for pkg in self.packages:
+            del pkg["architectures"]["aarch64_generic"]
+        self.reject("empty feed: latest/aarch64_generic")
 
     def test_path_traversal(self):
         self.repo["packages"] = ["../outside"]
         self.reject("invalid package name")
 
+    def test_stable_channel_is_rejected(self):
+        self.repo["channels"] = ["stable", "latest"]
+        self.reject("unexpected or missing fields")
+
     def test_source_asset_patterns_reject_paths_and_unknown_placeholders(self):
-        for pattern in ("../source.tar.gz", "source-{version}.tar.gz", "https://example.com/source.tar.gz"):
+        for pattern in ("../source.tar.gz", "source-{unknown}.tar.gz", "https://example.com/source.tar.gz"):
             self.packages[0]["source_assets"] = [pattern]
             self.reject("invalid source asset pattern")
 
@@ -107,14 +77,13 @@ class ConfigTests(unittest.TestCase):
         self.packages[1]["architectures"]["x86_64"]["package_arch"] = "aarch64"
         self.reject("incompatible package architecture")
 
-    def test_enabling_without_asset_pattern_rejected(self):
-        self.packages[1].update(enabled=True)
+    def test_missing_asset_pattern_is_rejected(self):
         self.packages[1]["architectures"]["x86_64"]["asset_pattern"] = None
-        self.reject("asset pattern required")
+        self.reject("asset pattern")
 
-    def test_enabling_without_abi_rejected(self):
-        self.packages[1].update(enabled=True)
-        self.reject("target ABI required")
+    def test_missing_abi_is_rejected(self):
+        self.repo["targets"][0]["abi"] = None
+        self.reject("invalid target ABI")
 
     def test_multiple_abis_rejected(self):
         self.repo["targets"] = [{"arch": "x86_64", "abi": "a"}, {"arch": "aarch64_cortex_a53", "abi": "b"}]
@@ -123,10 +92,6 @@ class ConfigTests(unittest.TestCase):
     def test_asset_path_rejected(self):
         self.packages[1]["architectures"]["x86_64"]["asset_pattern"] = "../{version}.tar.gz"
         self.reject("asset pattern")
-
-    def test_fixed_revision_rejects_placeholder(self):
-        self.packages[0]["revision"] = 4
-        self.reject("revision placeholder")
 
     def test_url_credentials_rejected(self):
         self.repo["base_url"] = "https://user:password@example.com/feed"

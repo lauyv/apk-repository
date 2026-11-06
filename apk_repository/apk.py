@@ -1,7 +1,6 @@
 """APK v3 helpers. All commands use argv, never interpolated shell code."""
 
 import json
-import os
 import re
 import subprocess
 from pathlib import Path
@@ -35,22 +34,10 @@ def validate_package(apk, path, package, version, arch, signed_keys=None):
     return info
 
 
-def make_package(apk, root, destination, info, scripts=None):
-    args = [apk, "mkpkg", "--compat", "3.0.0", "--files", root, "--output", destination]
-    for key, value in info.items():
-        args += ["--info", f"{key}:{value}"]
-    for kind, path in (scripts or {}).items():
-        args += ["--script", f"{kind}:{path}"]
-    # The pipeline runs under fakeroot, preserving root ownership in package metadata.
-    require(os.geteuid() == 0 or os.environ.get("FAKEROOTKEY"), "run packaging under fakeroot")
-    run(args)
-
-
-def index(apk, directory, key=None):
+def index(apk, directory, key):
     packages = sorted(Path(directory).glob("*.apk"))
     require(packages, "refusing an empty feed")
     args = [apk, "mkndx", "--allow-untrusted", "--output", Path(directory) / "packages.adb",
             "--pkgname-spec", "${name}-${version}.apk"]
-    if key:
-        args += ["--sign-key", key]
+    args += ["--sign-key", key]
     run(args + packages)

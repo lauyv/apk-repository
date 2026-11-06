@@ -6,12 +6,12 @@
 
 首批接入：
 
-| 包                   | 用途              | 上游                       |
-| -------------------- | ----------------- | -------------------------- |
-| `sing-box`           | 代理核心          | `SagerNet/sing-box`        |
-| `luci-app-sing-box`  | LuCI 管理界面     | `lauyv/luci-app-sing-box`  |
-| `luci-app-cake-tiny` | CAKE 流量整形界面 | `lauyv/luci-app-cake-tiny` |
-| `luci-app-honk` | 内置 Honk 核心的 LuCI 配置与服务管理（仅 latest） | `lauyv/luci-app-honk` |
+| 包                   | 用途                                 | 上游                       |
+| -------------------- | ------------------------------------ | -------------------------- |
+| `sing-box`           | 代理核心                             | `SagerNet/sing-box`        |
+| `luci-app-sing-box`  | LuCI 管理界面                        | `lauyv/luci-app-sing-box`  |
+| `luci-app-cake-tiny` | CAKE 流量整形界面                    | `lauyv/luci-app-cake-tiny` |
+| `luci-app-honk`      | 内置 Honk 核心的 LuCI 配置与服务管理 | `lauyv/luci-app-honk`      |
 
 软件包来自上游编译好的 OpenWrt APK，保留原始内容和依赖。其他架构、opkg/IPK 系统不适用当前订阅地址。
 
@@ -41,24 +41,24 @@ mv /tmp/apk-repository.pem /etc/apk/keys/apk-repository.pem
 
 可在 SSH 中运行 `cat /etc/apk/arch` 确认设备使用的包架构。进入 **系统 → 软件包 → 配置**，打开 `/etc/apk/repositories.d/customfeeds.list`。保留已有内容，另起一行添加下面对应设备架构的地址。
 
-| 设备架构          | 推荐的 latest 源                                                                 |
+| 设备架构          | latest 源                                                                        |
 | ----------------- | -------------------------------------------------------------------------------- |
 | `x86_64`          | `https://lauyv.github.io/apk-repository/apk/latest/x86_64/packages.adb`          |
 | `aarch64_generic` | `https://lauyv.github.io/apk-repository/apk/latest/aarch64_generic/packages.adb` |
 
-`latest` 对每个包选择上游最近发布的非草稿版本，不区分正式版和预发布版。若只需要正式版，可把地址中的 `latest` 改成 `stable`。同一时间只添加一个本仓库通道，不要同时添加多个地址。
+`latest` 对每个包选择上游发布列表中首个非草稿版本，不区分正式版和预发布版。本仓库仅提供 `latest` 通道。
 
 点击 **保存**，关闭配置窗口后点击 **更新列表**。保留官方 `distfeeds.list`，以便解析软件包依赖。
 
 ### 4. 在页面安装和更新
 
-在 **系统 → 软件包 → 可用** 中搜索需要的 `sing-box`、`luci-app-sing-box` 、`luci-app-cake-tiny` 或 `luci-app-honk`（仅 latest），确认显示的版本与[软件源发布清单](https://lauyv.github.io/apk-repository/manifest.json)中所选通道、架构一致，再点击 **安装**。日后在该页面更新列表并更新这些包即可。若页面列出多个同名包且无法确认所选版本来自本源，请先核对版本和软件源，避免装回其他来源的包。
+在 **系统 → 软件包 → 可用** 中搜索需要的 `sing-box`、`luci-app-sing-box` 、`luci-app-cake-tiny` 或 `luci-app-honk`，确认显示的版本与[软件源发布清单](https://lauyv.github.io/apk-repository/manifest.json)中所选通道、架构一致，再点击 **安装**。日后在该页面更新列表并更新这些包即可。若页面列出多个同名包且无法确认所选版本来自本源，请先核对版本和软件源，避免装回其他来源的包。
 
 本源软件包依赖与当前固件匹配的官方内核模块。其他架构及 opkg/IPK 系统不适用上述地址。
 
 使用 CAKE Tiny 前，先停用其他占用 WAN 队列规则的流量整形服务，再在 **网络 → CAKE Tiny** 中启用并配置速率。
 
-切换通道时，在同一配置页面替换原有的本仓库地址，保存并更新列表。停止使用时，删除该行并更新列表；保留其他源和公钥文件。
+停止使用时，删除该行并更新列表；保留其他源和公钥文件。
 
 ## 其他说明
 

@@ -29,5 +29,5 @@ jobs:
         run: uv run --locked python -m unittest discover -s tests -v
       - name: Check Python with Ruff
         run: uv run --locked ruff check .
-      - name: Preview candidate jobs
-        run: uv run --locked python -m apk_repository plan --channel stable --include-disabled
+      - name: Preview latest feed
+        run: uv run --locked python -m apk_repository plan

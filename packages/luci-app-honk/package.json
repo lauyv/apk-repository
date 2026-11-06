@@ -1,15 +1,9 @@
 {
   "schema_version": 1,
   "name": "luci-app-honk",
-  "enabled": true,
   "source": "lauyv/luci-app-honk",
-  "method": "sync-apk",
-  "channels": [
-    "latest"
-  ],
-  "revision": null,
   "source_assets": [
-    "honk-source-{tag}.tar.gz",
+    "honk-source-v{version}.tar.gz",
     "doona-source-*.tar.gz"
   ],
   "architectures": {

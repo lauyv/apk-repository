@@ -8,9 +8,8 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from .apk import check_tool, index, metadata, validate_package
+from .apk import check_tool, metadata, validate_package
 from .config import load, require
-from .reuse import fingerprint
 from .upstream import (
     download,
     package_version,
@@ -46,63 +45,53 @@ def build(root, apk, output, cache=None):
                     "apk_tools": repo["apk_tools"], "base_url": repo["base_url"],
                     "workflow_url": os.environ.get("GITHUB_SERVER_URL", "https://github.com") + "/" + os.environ.get("GITHUB_REPOSITORY", "local") + "/actions/runs/" + os.environ.get("GITHUB_RUN_ID", "local"),
                     "packages": []}
-        resolutions = {}
-        for channel in repo["channels"]:
-            for pkg in packages:
-                if not pkg["enabled"] or channel not in pkg["channels"]:
-                    continue
-                key = (pkg["source"], channel)
-                if key not in resolutions:
-                    resolutions[key] = resolve_release(pkg["source"], channel)
-                release, commit = resolutions[key]
-                source_rel = "sources/{}/{}.tar.gz".format(pkg["name"], commit)
-                source_path = site / source_rel
-                if not source_path.exists():
-                    download("https://codeload.github.com/{}/tar.gz/{}".format(pkg["source"], commit), source_path)
-                source_assets = []
-                for asset in select_source_assets(release, pkg["source"], pkg.get("source_assets", [])):
-                    digest = asset["digest"].split(":", 1)[1]
-                    used_downloads.add(digest)
-                    cached = download(asset["browser_download_url"], downloads / digest, digest, asset["size"])
-                    relative = f"sources/{pkg['name']}/{commit}/{asset['name']}"
-                    destination = site / relative
-                    destination.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copyfile(cached, destination)
-                    source_assets.append({"asset_id": asset["id"], "asset_name": asset["name"],
-                                          "sha256": digest, "file": relative})
-                for target in repo["targets"]:
-                    arch = target["arch"]
-                    if arch not in pkg["architectures"]:
-                        continue
-                    mapping = pkg["architectures"][arch]
-                    asset = select_asset(release, pkg["source"], mapping["asset_pattern"])
-                    digest = asset["digest"].split(":", 1)[1]
-                    used_downloads.add(digest)
-                    asset_path = download(asset["browser_download_url"], downloads / digest,
-                                          digest, asset["size"])
-                    observed = (metadata(apk, asset_path)["info"].get("version")
-                                if pkg["revision"] is None and "{revision}" not in mapping["asset_pattern"] else None)
-                    version = package_version(release["tag_name"], mapping["asset_pattern"],
-                                              asset["name"], pkg["revision"], observed)
-                    feed = site / "apk" / channel / arch
-                    feed.mkdir(parents=True, exist_ok=True)
-                    destination = feed / (pkg["name"] + "-" + version + ".apk")
-                    shutil.copyfile(asset_path, destination)
-                    validate_package(apk, destination, pkg, version, mapping["package_arch"])
-                    manifest["packages"].append({
-                        "name": pkg["name"], "version": version, "channel": channel, "arch": arch,
-                        "abi": target["abi"], "package_arch": mapping["package_arch"],
-                        "file": destination.relative_to(site).as_posix(), "source": pkg["source"],
-                        "source_commit": commit, "source_archive": source_rel, "source_sha256": sha256(source_path),
-                        "source_assets": source_assets,
-                        "release_id": release["id"], "release_tag": release["tag_name"],
-                        "upstream_prerelease": release["prerelease"], "asset_id": asset["id"],
-                        "asset_name": asset["name"], "asset_sha256": digest, "sha256": sha256(destination),
-                        "reuse_fingerprint": fingerprint(repo, pkg, target),
-                    })
+        for pkg in packages:
+            release, commit = resolve_release(pkg["source"])
+            source_rel = "sources/{}/{}.tar.gz".format(pkg["name"], commit)
+            source_path = site / source_rel
+            if not source_path.exists():
+                download("https://codeload.github.com/{}/tar.gz/{}".format(pkg["source"], commit), source_path)
+            source_assets = []
+            for asset in select_source_assets(release, pkg["source"], pkg.get("source_assets", [])):
+                digest = asset["digest"].split(":", 1)[1]
+                used_downloads.add(digest)
+                cached = download(asset["browser_download_url"], downloads / digest, digest, asset["size"])
+                relative = f"sources/{pkg['name']}/{commit}/{asset['name']}"
+                destination = site / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(cached, destination)
+                source_assets.append({"asset_id": asset["id"], "asset_name": asset["name"],
+                                      "sha256": digest, "file": relative})
             for target in repo["targets"]:
-                index(apk, site / "apk" / channel / target["arch"])
-        require(manifest["packages"], "no enabled packages")
+                arch = target["arch"]
+                if arch not in pkg["architectures"]:
+                    continue
+                mapping = pkg["architectures"][arch]
+                asset = select_asset(release, pkg["source"], mapping["asset_pattern"])
+                digest = asset["digest"].split(":", 1)[1]
+                used_downloads.add(digest)
+                asset_path = download(asset["browser_download_url"], downloads / digest,
+                                      digest, asset["size"])
+                observed = (metadata(apk, asset_path)["info"].get("version")
+                            if "{revision}" not in mapping["asset_pattern"] else None)
+                version = package_version(release["tag_name"], mapping["asset_pattern"],
+                                          asset["name"], observed)
+                feed = site / "apk" / "latest" / arch
+                feed.mkdir(parents=True, exist_ok=True)
+                destination = feed / (pkg["name"] + "-" + version + ".apk")
+                shutil.copyfile(asset_path, destination)
+                validate_package(apk, destination, pkg, version, mapping["package_arch"])
+                manifest["packages"].append({
+                    "name": pkg["name"], "version": version, "channel": "latest", "arch": arch,
+                    "abi": target["abi"], "package_arch": mapping["package_arch"],
+                    "file": destination.relative_to(site).as_posix(), "source": pkg["source"],
+                    "source_commit": commit, "source_archive": source_rel, "source_sha256": sha256(source_path),
+                    "source_assets": source_assets,
+                    "release_id": release["id"], "release_tag": release["tag_name"],
+                    "upstream_prerelease": release["prerelease"], "asset_id": asset["id"],
+                    "asset_name": asset["name"], "asset_sha256": digest, "sha256": sha256(destination),
+                })
+        require(manifest["packages"], "no packages")
         write_json(site / "manifest.json", manifest)
         # Publish only a complete fresh tree. No old APKs or source archives are carried forward.
         site.rename(output)

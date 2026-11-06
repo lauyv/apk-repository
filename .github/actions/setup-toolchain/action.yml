@@ -24,7 +24,7 @@ runs:
       shell: bash
       run: |
         sudo apt-get update -qq
-        sudo apt-get install -y --no-install-recommends libssl3t64 zlib1g libzstd1 fakeroot wget curl
+        sudo apt-get install -y --no-install-recommends libssl3t64 zlib1g libzstd1 wget curl
     - name: Install APK Tools build dependencies
       if: steps.apk-cache.outputs.cache-hit != 'true'
       shell: bash

@@ -16,8 +16,7 @@ class BuildCacheTests(unittest.TestCase):
     def test_honk_build_publishes_architecture_apks_and_bundled_sources(self):
         repo, packages = load(ROOT)
         package = next(p for p in packages if p["name"] == "luci-app-honk")
-        repo["channels"] = ["latest"]
-        tag = "v0.1.0-beta.4"
+        tag = "v0.1.0-beta.4-r1"
         release = {"id": 1, "tag_name": tag, "prerelease": True, "assets": []}
         content_by_url = {}
         names = [f"luci-app-honk-0.1.0_beta4-r1-{t['arch']}.apk" for t in repo["targets"]]
@@ -30,16 +29,12 @@ class BuildCacheTests(unittest.TestCase):
                                       "digest": "sha256:" + hashlib.sha256(content).hexdigest(),
                                       "browser_download_url": url})
 
-        def indexed(apk, feed):
-            (feed / "packages.adb").write_bytes(b"index")
-
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
             with (patch("apk_repository.build.load", return_value=(repo, [package])),
                   patch("apk_repository.build.check_tool"),
                   patch("apk_repository.build.resolve_release", return_value=(release, "a" * 40)),
                   patch("apk_repository.build.validate_package") as validate,
-                  patch("apk_repository.build.index", side_effect=indexed),
                   patch("apk_repository.upstream.open_url", side_effect=lambda url: io.BytesIO(
                       content_by_url.get(url, b"LuCI source"))) as network):
                 for attempt in ("first", "second"):
@@ -50,13 +45,14 @@ class BuildCacheTests(unittest.TestCase):
             self.assertEqual({call.args[-1] for call in validate.call_args_list}, {"x86_64", "aarch64_generic"})
             for record in records:
                 self.assertEqual(record["version"], "0.1.0_beta4-r1")
+                self.assertEqual(record["release_tag"], tag)
                 self.assertEqual(len(record["source_assets"]), 2)
                 for source in record["source_assets"]:
                     path = directory / "second" / source["file"]
                     self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), source["sha256"])
             self.assertEqual(sum(call.args[0] in content_by_url for call in network.call_args_list), 4)
 
-    def test_second_build_reuses_verified_downloads_and_generates_fresh_feeds(self):
+    def test_second_build_reuses_verified_downloads_in_fresh_tree(self):
         self.check_cached_build("luci-app-cake-tiny", 3)
 
     def test_cached_apk_keeps_revision_derived_from_metadata(self):
@@ -76,9 +72,6 @@ class BuildCacheTests(unittest.TestCase):
         def opened(url):
             return io.BytesIO(apk_bytes if url == asset["browser_download_url"] else b"source archive fixture")
 
-        def indexed(apk, feed):
-            (feed / "packages.adb").write_bytes(b"fresh index")
-
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
             cache = directory / "cache"
@@ -97,7 +90,6 @@ class BuildCacheTests(unittest.TestCase):
                 patch("apk_repository.build.select_asset", return_value=asset),
                 patch("apk_repository.build.metadata", return_value={"info": {"version": f"1.2.3-r{revision}"}}),
                 patch("apk_repository.build.validate_package") as validate,
-                patch("apk_repository.build.index", side_effect=indexed) as index,
                 patch("apk_repository.upstream.open_url", side_effect=opened) as network,
             ):
                 first, second = directory / "first", directory / "second"
@@ -107,8 +99,7 @@ class BuildCacheTests(unittest.TestCase):
                 build(ROOT, "apk", second, cache)
             apk_requests = [call for call in network.call_args_list if call.args[0] == asset["browser_download_url"]]
             self.assertEqual(len(apk_requests), 1)
-            self.assertEqual(validate.call_count, 4)  # Both channels are validated on both runs.
-            self.assertEqual(index.call_count, 4)  # Indexes are always regenerated.
+            self.assertEqual(validate.call_count, 2)  # Latest is validated on both runs.
             self.assertFalse((second / "old.apk").exists())
             self.assertEqual((cache / "unrelated-notes.txt").read_bytes(), b"keep notes")
             self.assertEqual((cache / ("c" * 64)).read_bytes(), b"another application's cache")
@@ -116,6 +107,6 @@ class BuildCacheTests(unittest.TestCase):
             self.assertFalse(obsolete.exists())
             self.assertEqual({p.name for p in downloads.iterdir()}, {digest, "README.txt"})
             manifest = json.loads((second / "manifest.json").read_text())
-            self.assertEqual(len(manifest["packages"]), 2)
+            self.assertEqual(len(manifest["packages"]), 1)
             self.assertEqual({record["version"] for record in manifest["packages"]}, {f"1.2.3-r{revision}"})
-            self.assertTrue(all(record["reuse_fingerprint"] for record in manifest["packages"]))
+            self.assertFalse(list(second.rglob("packages.adb")))

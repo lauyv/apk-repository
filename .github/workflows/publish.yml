@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       check_installation:
-        description: 'Run OpenWrt installation and upgrade checks for both architectures'
+        description: 'Run OpenWrt installation checks for both architectures'
         type: boolean
         default: false
   schedule:
@@ -27,7 +27,7 @@ env:
 
 jobs:
   check-updates:
-    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    if: github.event_name == 'schedule' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
@@ -47,14 +47,16 @@ jobs:
       - run: uv sync --locked
       - name: Check upstream releases against published manifest
         id: check
-        if: github.event_name == 'schedule'
         env:
           GH_TOKEN: ${{ github.token }}
         run: uv run --locked python -m apk_repository check-updates
 
   assemble:
     needs: check-updates
-    if: github.event_name == 'workflow_dispatch' || needs.check-updates.outputs.changed == 'true'
+    if: >-
+      ${{ !cancelled() && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) &&
+          (github.event_name == 'workflow_dispatch' ||
+           (needs.check-updates.result == 'success' && needs.check-updates.outputs.changed == 'true')) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -73,7 +75,7 @@ jobs:
           uv run --locked python -m apk_repository validate
           uv run --locked ruff check .
           uv run --locked python -m unittest discover -s tests -v
-      - name: Synchronize APKs for all channels
+      - name: Synchronize latest APKs
         env:
           GH_TOKEN: ${{ github.token }}
         run: uv run --locked python -m apk_repository build --apk "$TOOLS_DIR/apk" --output build/unsigned --cache build/cache/upstream-apks
@@ -95,12 +97,6 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-toolchain
-      - name: Restore previous signed repository
-        uses: actions/cache@v6.1.0
-        with:
-          path: build/cache/signed
-          key: signed-apks-v1-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: signed-apks-v1-
       - uses: actions/download-artifact@v8.0.1
         with:
           name: unsigned-repository
@@ -117,13 +113,15 @@ jobs:
           printf '%s\n' "$APK_SIGNING_KEY" > "$key_file"
           unset APK_SIGNING_KEY
           umask 022
-          fakeroot uv run --locked python -m apk_repository sign --apk "$TOOLS_DIR/apk" --input build/unsigned --output build/public --key "$key_file" --previous build/cache/signed
+          uv run --locked python -m apk_repository sign --apk "$TOOLS_DIR/apk" --input build/unsigned --output build/public --key "$key_file"
           uv run --locked python -m apk_repository verify --apk "$TOOLS_DIR/apk" --site build/public
           uv run --locked python -c 'import json; d=json.load(open("build/public/manifest.json")); print("Public key SHA-256: `" + d["key_sha256"] + "`")' >> "$GITHUB_STEP_SUMMARY"
-      - name: Prepare verified signed APK cache for the next run
-        run: |
-          uv run --locked python -c 'import shutil; from pathlib import Path; p=Path("build/cache/signed"); shutil.rmtree(p, ignore_errors=True); shutil.copytree("build/public", p)'
+      - uses: actions/upload-pages-artifact@v5.0.0
+        with:
+          path: build/public
+          retention-days: 1
       - uses: actions/upload-artifact@v7.0.1
+        if: inputs.check_installation
         with:
           name: signed-repository
           path: build/public/
@@ -131,26 +129,6 @@ jobs:
           if-no-files-found: error
           retention-days: 1
           compression-level: 0
-
-  verify:
-    needs: sign
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v7.0.1
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/setup-toolchain
-      - uses: actions/download-artifact@v8.0.1
-        with:
-          name: signed-repository
-          path: build/public
-      - name: Verify signed artifacts
-        run: uv run --locked python -m apk_repository verify --apk "$TOOLS_DIR/apk" --site build/public
-      - uses: actions/upload-pages-artifact@v5.0.0
-        with:
-          path: build/public
-          retention-days: 1
 
   check-installation:
     needs: sign
@@ -169,27 +147,24 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
-      - uses: ./.github/actions/setup-toolchain
       - uses: actions/download-artifact@v8.0.1
         with:
           name: signed-repository
           path: build/public
-      - name: Verify signed artifacts
-        run: uv run --locked python -m apk_repository verify --apk "$TOOLS_DIR/apk" --site build/public
       - name: Cache OpenWrt rootfs
         uses: actions/cache@v6.1.0
         with:
           path: build/cache/openwrt/${{ matrix.arch }}
           key: openwrt-rootfs-v1-${{ matrix.arch }}-${{ hashFiles('scripts/check-openwrt.sh') }}
-      - name: Check installation and upgrades in OpenWrt
+      - name: Check installation in OpenWrt
         env:
           CHECK_ARCH: ${{ matrix.arch }}
         run: bash scripts/check-openwrt.sh build/public "$CHECK_ARCH"
 
   deploy:
-    needs: [verify, check-installation]
+    needs: [sign, check-installation]
     if: >-
-      ${{ !cancelled() && needs.verify.result == 'success' &&
+      ${{ !cancelled() && needs.sign.result == 'success' &&
           (needs.check-installation.result == 'success' ||
            (needs.check-installation.result == 'skipped' &&
             !(github.event_name == 'workflow_dispatch' && inputs.check_installation))) }}

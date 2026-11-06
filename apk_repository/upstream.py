@@ -14,38 +14,40 @@ from pathlib import Path
 from .config import require
 
 MAX_DOWNLOAD = 512 * 1024 * 1024
-VERSION = re.compile(r"v?(\d+\.\d+\.\d+)(?:-(alpha|beta|rc)[.-]?(\d+))?")
+VERSION = re.compile(r"v?(\d+\.\d+\.\d+)(?:-(alpha|beta|rc)[.-]?(\d+))?(?:-r(0|[1-9][0-9]*))?")
 
 
 def version_parts(tag):
     match = VERSION.fullmatch(tag)
     require(match is not None, "unsupported upstream version: " + tag)
-    base, suffix, number = match.groups()
+    base, suffix, number, revision = match.groups()
     upstream = tag.removeprefix("v")
+    if revision is not None:
+        upstream = upstream.removesuffix("-r" + revision)
     apk = base + ("_" + suffix + number if suffix else "")
     return upstream, apk
 
 
-def package_version(tag, pattern, asset_name, revision, observed_version=None):
+def package_version(tag, pattern, asset_name, observed_version=None):
     upstream, apk = version_parts(tag)
+    tag_revision = VERSION.fullmatch(tag).group(4)
     expected = pattern.replace("{version}", upstream).replace("{apk_version}", apk)
-    if revision is None:
-        if "{revision}" in expected:
-            expression = re.escape(expected).replace(r"\{revision\}", r"(0|[1-9][0-9]*)")
-            match = re.fullmatch(expression, asset_name)
-            require(match is not None, "asset name does not match configured revision pattern")
-            revision = int(match.group(1))
-        else:
-            require(asset_name == expected, "asset name does not match configured pattern")
-            require(isinstance(observed_version, str)
-                    and re.fullmatch(re.escape(apk) + r"-r(0|[1-9][0-9]*)", observed_version),
-                    "APK metadata version does not match Release tag")
-            return observed_version
+    if "{revision}" in expected:
+        expression = re.escape(expected).replace(r"\{revision\}", r"(0|[1-9][0-9]*)")
+        match = re.fullmatch(expression, asset_name)
+        require(match is not None, "asset name does not match configured revision pattern")
+        revision = match.group(1)
+        version = apk + "-r" + revision
+        require(observed_version is None or observed_version == version, "APK metadata version mismatch")
     else:
         require(asset_name == expected, "asset name does not match configured pattern")
-    result = apk + "-r" + str(revision)
-    require(observed_version is None or observed_version == result, "APK metadata version mismatch")
-    return result
+        require(isinstance(observed_version, str)
+                and re.fullmatch(re.escape(apk) + r"-r(0|[1-9][0-9]*)", observed_version),
+                "APK metadata version does not match Release tag")
+        version = observed_version
+    require(tag_revision is None or version == apk + "-r" + tag_revision,
+            "APK revision does not match Release tag")
+    return version
 
 
 def sha256(path):
@@ -127,16 +129,12 @@ def download(url, destination, digest=None, size=None):
     return destination
 
 
-def select_release(releases, channel, tag=None):
-    require(channel in ("stable", "latest"), "unknown channel: " + channel)
+def select_release(releases, tag=None):
     candidates = [r for r in releases if not r.get("draft") and r.get("published_at")
-                  and (channel == "latest" or not r.get("prerelease"))
                   and (tag is None or r.get("tag_name") == tag)]
-    require(candidates, "no eligible Release for " + channel + (": " + tag if tag else ""))
-    selected = max(candidates, key=lambda r: (r["published_at"], r["id"]))
+    require(candidates, "no eligible Release" + (": " + tag if tag else ""))
+    selected = candidates[0]
     version_parts(selected["tag_name"])
-    if channel == "stable":
-        require(VERSION.fullmatch(selected["tag_name"]).group(2) is None, "prerelease tag in stable channel")
     return selected
 
 
@@ -154,24 +152,13 @@ def resolve_tag_commit(source, tag):
     require(False, "release tag indirection is too deep")
 
 
-def resolve_release(source, channel, tag=None):
+def resolve_release(source, tag=None):
     if tag:
         releases = [api_json("repos/{}/releases/tags/{}".format(source, urllib.parse.quote(tag, safe="")))]
-    elif channel == "stable":
-        releases = [api_json(f"repos/{source}/releases/latest")]
-    elif channel == "latest":
-        releases = []
-        page = 1
-        while True:
-            batch = api_json(f"repos/{source}/releases?per_page=10&page={page}")
-            require(isinstance(batch, list), "invalid Release API response")
-            releases.extend(batch)
-            if len(batch) < 10:
-                break
-            page += 1
     else:
-        require(False, "unknown channel: " + channel)
-    release = select_release(releases, channel, tag)
+        releases = api_json(f"repos/{source}/releases?per_page=10")
+        require(isinstance(releases, list), "invalid Release API response")
+    release = select_release(releases, tag)
     commit = resolve_tag_commit(source, release["tag_name"])
     return release, commit
 
@@ -184,13 +171,19 @@ def select_asset(release, source, pattern):
     require(len(assets) == 1, "Release must contain exactly one asset matching " + expected)
     asset = assets[0]
     validate_asset(release, source, asset)
+    if "{revision}" in pattern:
+        package_version(release["tag_name"], pattern, asset["name"])
     return asset
+
+
+def source_asset_pattern(pattern, tag):
+    return pattern.replace("{version}", version_parts(tag)[0])
 
 
 def select_source_assets(release, source, patterns):
     selected = []
     for pattern in patterns:
-        expected = pattern.replace("{tag}", release["tag_name"])
+        expected = source_asset_pattern(pattern, release["tag_name"])
         assets = [a for a in release["assets"] if fnmatch.fnmatchcase(a["name"], expected)]
         require(len(assets) == 1, "Release must contain exactly one source asset matching " + expected)
         asset = assets[0]

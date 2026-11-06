@@ -1,11 +1,7 @@
 {
   "schema_version": 1,
   "name": "luci-app-cake-tiny",
-  "enabled": true,
   "source": "lauyv/luci-app-cake-tiny",
-  "method": "sync-apk",
-  "channels": ["stable", "latest"],
-  "revision": null,
   "architectures": {
     "aarch64_generic": {
       "asset_pattern": "luci-app-cake-tiny-{version}-r{revision}.apk",
