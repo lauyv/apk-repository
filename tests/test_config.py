@@ -38,18 +38,24 @@ class ConfigTests(unittest.TestCase):
         for job in result["jobs"]:
             self.assertEqual(job["index_url"], f"https://lauyv.github.io/apk-repository/apk/latest/{job['arch']}/packages.adb")
 
+    def test_stable_plan_excludes_latest_only_honk(self):
+        result = plan(self.repo, self.packages, "stable")
+        self.assertEqual(len(result["jobs"]), 6)
+        self.assertNotIn("luci-app-honk", {job["package"] for job in result["jobs"]})
+        self.assertTrue(all("/apk/stable/" in job["index_url"] for job in result["jobs"]))
+
     def test_empty_architecture_feed_is_rejected(self):
         for pkg in self.packages:
             del pkg["architectures"]["aarch64_generic"]
-        self.reject("empty feed: latest/aarch64_generic")
+        self.reject("empty feed: stable/aarch64_generic")
 
     def test_path_traversal(self):
         self.repo["packages"] = ["../outside"]
         self.reject("invalid package name")
 
-    def test_stable_channel_is_rejected(self):
-        self.repo["channels"] = ["stable", "latest"]
-        self.reject("unexpected or missing fields")
+    def test_unknown_channel_is_rejected(self):
+        self.repo["channels"] = ["testing", "latest"]
+        self.reject("both stable and latest")
 
     def test_asset_pattern_requires_exactly_one_version_placeholder(self):
         self.packages[0]["architectures"]["x86_64"]["asset_pattern"] = "tool-{version}-{apk_version}.apk"

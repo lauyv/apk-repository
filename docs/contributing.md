@@ -14,6 +14,6 @@ Python 静态检查使用 Ruff，规则包含默认检查和导入排序。完�
 
 新增包在 `packages/<name>/package.json` 中声明固定上游、APK 资产名称、版本和架构，再注册到 `repository.json`。只接收适用的上游 APK v3；不要把 Android 或 Alpine APK 当成 OpenWrt APK。配置变化应附来源与审核说明。
 
-新增架构须同步补充 CI 安装检查。latest 各包只保留当前选中的版本，不引入历史产物合并或版本缓存到站点。详见[配置说明](configuration.md)。
+新增架构须同步补充 CI 安装检查。各通道的包只保留当前选中的版本，不引入历史产物合并或版本缓存到站点。详见[配置说明](configuration.md)。
 
 不要提交签名私钥、访问令牌、下载缓存、生成包或发布目录。

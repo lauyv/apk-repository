@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class UpdateTests(unittest.TestCase):
     def check(self, published=None, error=None, digest="a" * 64):
-        def release(source):
+        def release(source, channel="latest"):
             return {"id": 1, "tag_name": "v1.0.0", "prerelease": False}, "b" * 40
 
         with (
@@ -31,11 +31,13 @@ class UpdateTests(unittest.TestCase):
     def manifest(self):
         repo, packages = load(ROOT)
         records = []
-        for target, pkg in itertools.product(repo["targets"], packages):
+        for target, pkg, channel in itertools.product(repo["targets"], packages, repo["channels"]):
+            if channel not in pkg["channels"]:
+                continue
             arch = target["arch"]
             if arch in pkg["architectures"]:
                 pattern = pkg["architectures"][arch]["asset_pattern"]
-                records.append({"channel": "latest", "arch": arch, "name": pkg["name"],
+                records.append({"channel": channel, "arch": arch, "name": pkg["name"],
                     "source": pkg["source"],
                     "source_commit": "b" * 40, "release_id": 1, "release_tag": "v1.0.0",
                     "upstream_prerelease": False, "asset_id": 2,
@@ -45,6 +47,16 @@ class UpdateTests(unittest.TestCase):
 
     def test_unchanged_skips_publication(self):
         self.assertFalse(self.check(self.manifest()))
+
+    def test_stable_change_alone_requires_publication(self):
+        published = self.manifest()
+        next(r for r in published["packages"] if r["channel"] == "stable")["release_id"] = 99
+        self.assertTrue(self.check(published))
+
+    def test_latest_only_published_site_requires_stable_publication(self):
+        published = self.manifest()
+        published["packages"] = [r for r in published["packages"] if r["channel"] == "latest"]
+        self.assertTrue(self.check(published))
 
     def test_replaced_asset_requires_publication(self):
         self.assertTrue(self.check(self.manifest(), digest="c" * 64))

@@ -11,5 +11,8 @@
       "asset_pattern": "luci-app-honk-{apk_version}-r{revision}-x86_64.apk",
       "package_arch": "x86_64"
     }
-  }
+  },
+  "channels": [
+    "latest"
+  ]
 }

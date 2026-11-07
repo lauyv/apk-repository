@@ -11,5 +11,9 @@
       "asset_pattern": "sing-box_{version}_openwrt_x86_64.apk",
       "package_arch": "x86_64"
     }
-  }
+  },
+  "channels": [
+    "stable",
+    "latest"
+  ]
 }

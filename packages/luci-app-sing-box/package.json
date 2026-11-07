@@ -11,5 +11,9 @@
       "asset_pattern": "luci-app-sing-box-{version}-r{revision}.apk",
       "package_arch": "noarch"
     }
-  }
+  },
+  "channels": [
+    "stable",
+    "latest"
+  ]
 }

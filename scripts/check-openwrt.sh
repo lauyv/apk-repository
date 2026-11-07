@@ -52,12 +52,13 @@ if ! curl --fail --silent --show-error http://127.0.0.1:8765/manifest.json -o /d
   exit 1
 fi
 
-echo "Checking installation: $ARCH / latest"
-python3 - "$SITE/manifest.json" "$WORK" "$ARCH" > "$WORK/versions" <<'PY'
+for channel in stable latest; do
+echo "Checking installation: $ARCH / $channel"
+python3 - "$SITE/manifest.json" "$WORK" "$ARCH" "$channel" > "$WORK/versions" <<'PY'
 import json, sys
 from pathlib import Path
 manifest = json.load(open(sys.argv[1]))
-records = [p for p in manifest["packages"] if p["arch"] == sys.argv[3]]
+records = [p for p in manifest["packages"] if p["arch"] == sys.argv[3] and p["channel"] == sys.argv[4]]
 assert records, "No packages for installation check"
 Path(sys.argv[2], "install-specs").write_text("".join(p["name"] + "@lauyv=" + p["version"] + "\n" for p in records))
 Path(sys.argv[2], "package-names").write_text("".join(p["name"] + "\n" for p in records))
@@ -67,7 +68,7 @@ print(core["release_tag"].removeprefix("v") if core else "")
 PY
 core_upstream=$(cat "$WORK/versions")
 docker run --rm --network host -v "$SITE:/feed:ro" -v "$WORK:/checks:ro" \
-  -e "ARCH=$ARCH" -e "CORE_UPSTREAM=$core_upstream" \
+  -e "CHANNEL=$channel" -e "ARCH=$ARCH" -e "CORE_UPSTREAM=$core_upstream" \
   apk-repository-openwrt:check /bin/sh -eu -c '
     actual_arch=$(cat /etc/apk/arch)
     if [ "$actual_arch" != "$ARCH" ]; then
@@ -76,7 +77,7 @@ docker run --rm --network host -v "$SITE:/feed:ro" -v "$WORK:/checks:ro" \
     fi
     mkdir -p /etc/apk/keys /etc/apk/repositories.d /var/lock
     cp /feed/apk/apk-repository.pem /etc/apk/keys/apk-repository.pem
-    printf "@lauyv http://127.0.0.1:8765/apk/latest/%s/packages.adb\n" "$ARCH" > /etc/apk/repositories.d/apk-repository.list
+    printf "@lauyv http://127.0.0.1:8765/apk/%s/%s/packages.adb\n" "$CHANNEL" "$ARCH" > /etc/apk/repositories.d/apk-repository.list
     apk update
     set --
     while IFS= read -r spec; do set -- "$@" "$spec"; done < /checks/install-specs
@@ -94,3 +95,4 @@ docker run --rm --network host -v "$SITE:/feed:ro" -v "$WORK:/checks:ro" \
     apk del --no-scripts "$@"
     test -s /etc/apk/repositories.d/distfeeds.list
   '
+done

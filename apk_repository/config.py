@@ -48,7 +48,7 @@ def read_json(path):
 def load(root):
     root = Path(root).resolve()
     repo = read_json(root / "repository.json")
-    fields(repo, "schema_version name base_url apk_tools packages targets", "repository")
+    fields(repo, "schema_version name base_url channels apk_tools packages targets", "repository")
     require(type(repo["schema_version"]) is int and repo["schema_version"] == 1, "unsupported repository schema")
     require(repo["name"] == "apk-repository", "repository name must be apk-repository")
     require(isinstance(repo["base_url"], str), "base_url must be a string")
@@ -56,6 +56,8 @@ def load(root):
     require(url.scheme == "https" and url.hostname and not url.username and not url.password
             and not url.query and not url.fragment and not repo["base_url"].endswith("/"),
             "base_url must be an HTTPS URL without credentials, query, fragment or trailing slash")
+    string_list(repo["channels"], "channels")
+    require(set(repo["channels"]) == {"stable", "latest"}, "both stable and latest channels are required")
     tool = repo["apk_tools"]
     fields(tool, "version source commit", "apk_tools")
     require(matches(tool["version"], r"3\.\d+\.\d+"), "apk_tools must pin a v3 release")
@@ -79,10 +81,12 @@ def load(root):
         path = root / "packages" / name / "package.json"
         require(root in path.resolve().parents, "package path escapes repository")
         pkg = read_json(path)
-        fields(pkg, "schema_version name source architectures", name)
+        fields(pkg, "schema_version name source channels architectures", name)
         require(type(pkg["schema_version"]) is int and pkg["schema_version"] == 1, name + ": unsupported schema")
         require(pkg["name"] == name, name + ": package name mismatch")
         require(matches(pkg["source"], r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+"), name + ": expected owner/repository")
+        string_list(pkg["channels"], name + ": channels")
+        require(pkg["channels"] and set(pkg["channels"]) <= set(repo["channels"]), name + ": invalid channels")
         mappings = pkg["architectures"]
         require(isinstance(mappings, dict) and mappings, name + ": architecture mappings required")
         require(set(mappings) <= arches, name + ": unknown architecture")
@@ -97,15 +101,18 @@ def load(root):
                                 r"[A-Za-z0-9][A-Za-z0-9_.+-]*"),
                     name + ": asset pattern must be a filename with {version} or {apk_version} and a compatible revision placeholder")
         packages.append(pkg)
-    for target in repo["targets"]:
-        arch = target["arch"]
-        require(any(arch in pkg["architectures"] for pkg in packages), f"empty feed: latest/{arch}")
+    for channel in repo["channels"]:
+        for target in repo["targets"]:
+            arch = target["arch"]
+            require(any(channel in pkg["channels"] and arch in pkg["architectures"] for pkg in packages),
+                    f"empty feed: {channel}/{arch}")
     return repo, packages
 
 
-def plan(repo, packages):
-    return {"channel": "latest", "jobs": [
+def plan(repo, packages, channel="latest"):
+    require(channel in repo["channels"], "unknown channel: " + channel)
+    return {"channel": channel, "jobs": [
         {"package": pkg["name"], "source": pkg["source"], "arch": target["arch"],
          **pkg["architectures"][target["arch"]],
-         "index_url": f"{repo['base_url']}/apk/latest/{target['arch']}/packages.adb"}
-        for pkg in packages for target in repo["targets"] if target["arch"] in pkg["architectures"]]}
+         "index_url": f"{repo['base_url']}/apk/{channel}/{target['arch']}/packages.adb"}
+        for pkg in packages for target in repo["targets"] if channel in pkg["channels"] and target["arch"] in pkg["architectures"]]}

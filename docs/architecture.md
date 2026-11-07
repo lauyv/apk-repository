@@ -23,6 +23,7 @@ public/
   SHA256SUMS.sig
   apk/
     apk-repository.pem
+    stable/                    # 正式版（同 latest 的架构目录）
     latest/
       x86_64/
         packages.adb
@@ -34,7 +35,7 @@ public/
         <package>-<version>.apk
 ```
 
-站点从空目录生成，整体部署，只含当前包和索引。页面为按架构分组的静态下载列表。设备直接安装公钥和配置 latest 源；不生成 bootstrap 配置包。
+站点从空目录生成，整体部署，只含当前包和索引。页面为按通道、架构分组的静态下载列表。设备直接安装公钥和配置 stable 或 latest 源；不生成 bootstrap 配置包。
 
 APK Tools 二进制使用精确配置和构建脚本作为缓存键，命中后检查版本。上游下载缓存按 SHA-256 复用，OpenWrt rootfs 按固定摘要缓存；使用前均重新校验。未缓存签名站点，不传输旧站点来复用签名。Actions 中间 artifact 保留 1 天。
 

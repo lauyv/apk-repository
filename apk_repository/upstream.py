@@ -8,6 +8,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from .config import require
@@ -128,12 +129,16 @@ def download(url, destination, digest=None, size=None):
     return destination
 
 
-def select_release(releases, tag=None):
+def select_release(releases, tag=None, channel="latest"):
+    require(channel in ("stable", "latest"), "unknown channel: " + channel)
     candidates = [r for r in releases if not r.get("draft") and r.get("published_at")
+                  and (channel == "latest" or not r.get("prerelease"))
                   and (tag is None or r.get("tag_name") == tag)]
     require(candidates, "no eligible Release" + (": " + tag if tag else ""))
     selected = candidates[0]
     version_parts(selected["tag_name"])
+    if channel == "stable":
+        require(VERSION.fullmatch(selected["tag_name"]).group(2) is None, "prerelease tag in stable channel")
     return selected
 
 
@@ -151,13 +156,16 @@ def resolve_tag_commit(source, tag):
     require(False, "release tag indirection is too deep")
 
 
-def resolve_release(source, tag=None):
+def resolve_release(source, tag=None, channel="latest"):
+    require(channel in ("stable", "latest"), "unknown channel: " + channel)
     if tag:
         releases = [api_json("repos/{}/releases/tags/{}".format(source, urllib.parse.quote(tag, safe="")))]
+    elif channel == "stable":
+        releases = [api_json(f"repos/{source}/releases/latest")]
     else:
         releases = api_json(f"repos/{source}/releases?per_page=10")
         require(isinstance(releases, list), "invalid Release API response")
-    release = select_release(releases, tag)
+    release = select_release(releases, tag, channel)
     commit = resolve_tag_commit(source, release["tag_name"])
     return release, commit
 
@@ -182,3 +190,11 @@ def validate_asset(release, source, asset):
     require(url.scheme == "https" and url.hostname == "github.com"
             and urllib.parse.unquote(url.path) == "/{}/releases/download/{}/{}".format(source, release["tag_name"], asset["name"]),
             "asset URL does not belong to the configured repository and Release")
+
+
+def resolve_channels(packages, resolver):
+    """Resolve each source/channel once, concurrently, preserving configuration order."""
+    requests = dict.fromkeys((p["source"], c) for p in packages for c in p["channels"])
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        pending = {key: pool.submit(resolver, key[0], channel=key[1]) for key in requests}
+        return {key: future.result() for key, future in pending.items()}

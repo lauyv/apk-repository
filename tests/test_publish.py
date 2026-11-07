@@ -30,21 +30,23 @@ class PublishTests(unittest.TestCase):
         self.repo, self.packages = load(ROOT)
         self.manifest = {"schema_version": 1, "apk_tools": self.repo["apk_tools"],
                          "base_url": self.repo["base_url"], "packages": []}
-        for pkg, target in itertools.product(self.packages, self.repo["targets"]):
+        for pkg, target, channel in itertools.product(self.packages, self.repo["targets"], self.repo["channels"]):
+            if channel not in pkg["channels"]:
+                continue
             arch = target["arch"]
-            tag = "v1.3.0-beta.1"
+            tag = "v1.3.0-beta.1" if channel == "latest" else "v1.3.0"
             pattern = pkg["architectures"][arch]["asset_pattern"]
             revision = 5
             asset_name = pattern.replace("{version}", tag.removeprefix("v")).replace("{apk_version}", version_parts(tag)[1]).replace("{revision}", str(revision))
-            observed = "1.3.0_beta1-r0" if pkg["name"] == "sing-box" else None
+            observed = ("1.3.0_beta1-r0" if channel == "latest" else "1.3.0-r0") if pkg["name"] == "sing-box" else None
             version = package_version(tag, pattern, asset_name, observed)
-            relative = "apk/{}/{}/{}-{}.apk".format("latest", arch, pkg["name"], version)
+            relative = "apk/{}/{}/{}-{}.apk".format(channel, arch, pkg["name"], version)
             path = self.site / relative
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(b"fixture: metadata mocked")
-            self.manifest["packages"].append({"name": pkg["name"], "channel": "latest", "arch": arch,
+            self.manifest["packages"].append({"name": pkg["name"], "channel": channel, "arch": arch,
                 "abi": "openwrt-25.12", "source": pkg["source"], "release_tag": tag,
-                "upstream_prerelease": True, "version": version, "file": relative,
+                "upstream_prerelease": channel == "latest", "version": version, "file": relative,
                 "asset_name": asset_name, "asset_sha256": sha256(path), "sha256": sha256(path),
                 "source_commit": "a" * 40})
 
@@ -54,7 +56,7 @@ class PublishTests(unittest.TestCase):
 
     def test_complete_latest_only_set(self):
         self.assertEqual(len(self.check()), sum(
-            len(pkg["architectures"]) for pkg in self.packages))
+            len(pkg["architectures"]) * len(pkg["channels"]) for pkg in self.packages))
 
     @unittest.skipUnless(shutil.which("openssl"), "OpenSSL required")
     def test_sign_and_verify_current_site_without_bootstrap_or_old_cache(self):
@@ -68,18 +70,21 @@ class PublishTests(unittest.TestCase):
                             "ec_paramgen_curve:P-256", "-out", str(key)], check=True, capture_output=True)
             key.chmod(0o600)
 
+            signed_paths = []
+
             def run(argv, **kwargs):
                 if argv[0] != "apk":
                     return subprocess.run(list(map(str, argv)), check=True, text=True, **kwargs)
                 path = Path(argv[-1])
                 if argv[1] == "adbsign":
+                    signed_paths.append(path)
                     path.write_bytes(path.read_bytes() + b"signature")
                 stdout = path.read_text() if argv[1] == "adbdump" else ""
                 return subprocess.CompletedProcess(argv, 0, stdout=stdout)
 
             def index(apk, feed, private_key):
                 entries = [{"name": r["name"], "version": r["version"]}
-                           for r in self.manifest["packages"] if r["arch"] == feed.name]
+                           for r in self.manifest["packages"] if r["arch"] == feed.name and r["channel"] == feed.parent.name]
                 (feed / "packages.adb").write_text(json.dumps({"packages": entries}))
 
             with (patch("apk_repository.publish.check_tool"),
@@ -92,12 +97,20 @@ class PublishTests(unittest.TestCase):
                 verify(ROOT, "apk", output)
                 manifest = json.loads((output / "manifest.json").read_text())
                 self.assertNotIn("bootstrap", manifest)
-                self.assertEqual(len(list(output.rglob("*.apk"))), 8)
+                self.assertEqual(len(list(output.rglob("*.apk"))), 14)
                 self.assertFalse(list(output.rglob("*.tar.gz")))
-                self.assertEqual(len(manifest["indexes"]), 2)
+                self.assertEqual(len(manifest["indexes"]), 4)
+                # All fixture APKs have identical bytes: sign once, copy to all feeds.
+                self.assertEqual(len(signed_paths), 1)
                 (output / manifest["packages"][0]["file"]).write_bytes(b"tampered")
                 with self.assertRaisesRegex(ConfigError, "checksum mismatch"):
                     verify(ROOT, "apk", output)
+
+    def test_stable_manifest_rejects_prerelease(self):
+        record = next(r for r in self.manifest["packages"] if r["channel"] == "stable")
+        record["upstream_prerelease"] = True
+        with self.assertRaisesRegex(ConfigError, "prerelease in stable"):
+            self.check()
 
     def test_latest_accepts_a_stable_upstream_release(self):
         for record in self.manifest["packages"]:
@@ -115,7 +128,7 @@ class PublishTests(unittest.TestCase):
                 path.write_bytes(b"fixture: metadata mocked")
                 record["asset_sha256"] = record["sha256"] = sha256(path)
         self.assertEqual(len(self.check()), sum(
-            len(pkg["architectures"]) for pkg in self.packages))
+            len(pkg["architectures"]) * len(pkg["channels"]) for pkg in self.packages))
 
     def test_old_or_duplicate_version_cannot_enter_feed(self):
         extra = copy.deepcopy(self.manifest["packages"][0])
@@ -166,7 +179,7 @@ class PublishTests(unittest.TestCase):
         with (patch("apk_repository.publish.resolve_release", return_value=(release, "a" * 40)) as resolved,
               patch("apk_repository.publish.select_asset", return_value=asset)):
             check_upstream_assets(self.packages, self.manifest, self.site)
-            resolved.assert_called_once_with(record["source"], record["release_tag"])
+            resolved.assert_called_once_with(record["source"], record["release_tag"], channel=record["channel"])
             (self.site / record["file"]).write_bytes(b"tampered APK")
             record["sha256"] = record["asset_sha256"] = sha256(self.site / record["file"])
             with self.assertRaisesRegex(ConfigError, "does not match GitHub"):
@@ -178,7 +191,7 @@ class RenderSiteTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.site = Path(self.temp.name).resolve()
-        self.repo = {"base_url": "https://example.invalid",
+        self.repo = {"channels": ["stable", "latest"], "base_url": "https://example.invalid",
                      "targets": [{"arch": "x86_64", "abi": "openwrt-25.12"},
                                  {"arch": "aarch64_generic", "abi": "openwrt-25.12"}]}
         self.manifest = {"key_sha256": "ab" * 32, "packages": [
@@ -189,15 +202,15 @@ class RenderSiteTests(unittest.TestCase):
         self.page = (self.site / "index.html").read_text()
 
     def test_packages_are_direct_links_grouped_by_architecture(self):
-        self.assertLess(self.page.index("<h2>x86_64</h2>"), self.page.index("sing-box-1.2.3-r0.apk"))
+        self.assertLess(self.page.index("<h2>latest / x86_64</h2>"), self.page.index("sing-box-1.2.3-r0.apk"))
         self.assertIn('href="apk/latest/x86_64/sing-box-1.2.3-r0.apk">sing-box-1.2.3-r0.apk</a>', self.page)
         self.assertIn('href="apk/latest/x86_64/packages.adb"', self.page)
         self.assertNotIn("<details", self.page)
         self.assertNotIn("<script", self.page)
-        self.assertNotIn("stable", self.page)
+        self.assertIn('href="apk/stable/x86_64/packages.adb"', self.page)
 
     def test_empty_architecture_still_lists_feed(self):
-        self.assertIn("<h2>aarch64_generic</h2>", self.page)
+        self.assertIn("<h2>latest / aarch64_generic</h2>", self.page)
         self.assertIn('href="apk/latest/aarch64_generic/packages.adb"', self.page)
 
     def test_filenames_and_links_are_escaped(self):

@@ -14,8 +14,9 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("validate", help="validate package configuration")
     commands.add_parser("check-updates", help="compare upstream releases with the published manifest")
-    commands.add_parser("plan", help="print the latest feed plan")
-    assemble = commands.add_parser("build", help="download and validate APKs for latest")
+    planning = commands.add_parser("plan", help="print a channel feed plan")
+    planning.add_argument("--channel", choices=("stable", "latest"), default="latest")
+    assemble = commands.add_parser("build", help="download and validate APKs for stable and latest")
     assemble.add_argument("--apk", required=True, type=Path)
     assemble.add_argument("--output", required=True, type=Path)
     assemble.add_argument("--cache", type=Path, help="reuse SHA-256-verified upstream APK downloads")
@@ -34,7 +35,7 @@ def main():
             print("Configuration valid: {} packages, {} targets".format(
                 len(packages), len(repo["targets"])))
         elif args.command == "plan":
-            print(json.dumps(plan(repo, packages), indent=2))
+            print(json.dumps(plan(repo, packages, args.channel), indent=2))
         elif args.command == "check-updates":
             from .updates import check_updates
             check_updates(args.root)

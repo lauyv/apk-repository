@@ -46,7 +46,7 @@ mv /tmp/apk-repository.pem /etc/apk/keys/apk-repository.pem
 | `x86_64`          | `https://lauyv.github.io/apk-repository/apk/latest/x86_64/packages.adb`          |
 | `aarch64_generic` | `https://lauyv.github.io/apk-repository/apk/latest/aarch64_generic/packages.adb` |
 
-`latest` 对每个包选择上游发布列表中首个非草稿版本，不区分正式版和预发布版。本仓库仅提供 `latest` 通道。
+`latest` 对每个包选择上游发布列表中首个非草稿版本，不区分正式版和预发布版。`stable` 跟随上游最新正式 Release；将上述地址中的 `/latest/` 换为 `/stable/` 即可订阅。每台设备选择一个通道。`luci-app-honk` 目前只在 latest 提供。
 
 点击 **保存**，关闭配置窗口后点击 **更新列表**。保留官方 `distfeeds.list`，以便解析软件包依赖。
 

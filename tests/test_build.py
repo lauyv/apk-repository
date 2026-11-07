@@ -4,6 +4,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from threading import Barrier
 from unittest.mock import patch
 
 from apk_repository.build import build
@@ -28,14 +29,20 @@ class BuildCacheTests(unittest.TestCase):
                                       "digest": "sha256:" + hashlib.sha256(content).hexdigest(),
                                       "browser_download_url": url})
 
+        barrier = Barrier(2)
+
+        def opened(url):
+            # Both unique assets must start together, not download serially.
+            barrier.wait(timeout=5)
+            return io.BytesIO(content_by_url[url])
+
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
             with (patch("apk_repository.build.load", return_value=(repo, [package])),
                   patch("apk_repository.build.check_tool"),
                   patch("apk_repository.build.resolve_release", return_value=(release, "a" * 40)),
                   patch("apk_repository.build.validate_package") as validate,
-                  patch("apk_repository.upstream.open_url", side_effect=lambda url: io.BytesIO(
-                      content_by_url[url])) as network):
+                  patch("apk_repository.upstream.open_url", side_effect=opened) as network):
                 for attempt in ("first", "second"):
                     build(ROOT, "apk", directory / attempt, directory / "cache")
             records = json.loads((directory / "second/manifest.json").read_text())["packages"]
@@ -83,7 +90,7 @@ class BuildCacheTests(unittest.TestCase):
             with (
                 patch("apk_repository.build.load", return_value=(repo, [package])),
                 patch("apk_repository.build.check_tool"),
-                patch("apk_repository.build.resolve_release", return_value=(release, "a" * 40)),
+                patch("apk_repository.build.resolve_release", return_value=(release, "a" * 40)) as resolved,
                 patch("apk_repository.build.select_asset", return_value=asset),
                 patch("apk_repository.build.metadata", return_value={"info": {"version": f"1.2.3-r{revision}"}}),
                 patch("apk_repository.build.validate_package") as validate,
@@ -96,7 +103,10 @@ class BuildCacheTests(unittest.TestCase):
                 build(ROOT, "apk", second, cache)
             apk_requests = [call for call in network.call_args_list if call.args[0] == asset["browser_download_url"]]
             self.assertEqual(len(apk_requests), 1)
-            self.assertEqual(validate.call_count, 2)  # Latest is validated on both runs.
+            self.assertEqual(validate.call_count, 2)  # Shared by both channels in each run.
+            self.assertEqual(resolved.call_count, 4)  # Two channels per run, not per arch.
+            self.assertEqual({r["channel"] for r in json.loads((second / "manifest.json").read_text())["packages"]},
+                             {"stable", "latest"})
             self.assertFalse((second / "old.apk").exists())
             self.assertEqual((cache / "unrelated-notes.txt").read_bytes(), b"keep notes")
             self.assertEqual((cache / ("c" * 64)).read_bytes(), b"another application's cache")
@@ -104,6 +114,6 @@ class BuildCacheTests(unittest.TestCase):
             self.assertFalse(obsolete.exists())
             self.assertEqual({p.name for p in downloads.iterdir()}, {digest, "README.txt"})
             manifest = json.loads((second / "manifest.json").read_text())
-            self.assertEqual(len(manifest["packages"]), 1)
+            self.assertEqual(len(manifest["packages"]), 2)
             self.assertEqual({record["version"] for record in manifest["packages"]}, {f"1.2.3-r{revision}"})
             self.assertFalse(list(second.rglob("packages.adb")))

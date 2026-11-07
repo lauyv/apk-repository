@@ -5,7 +5,7 @@ import os
 import urllib.error
 
 from .config import load, require
-from .upstream import open_url, resolve_release, select_asset
+from .upstream import open_url, resolve_channels, resolve_release, select_asset
 
 FIELDS = ("channel", "arch", "name", "source", "source_commit",
           "release_id", "release_tag", "upstream_prerelease", "asset_id", "asset_name", "asset_sha256")
@@ -29,20 +29,22 @@ def check_updates(root):
             raise
 
     records = []
+    releases = resolve_channels(packages, resolve_release)
     for pkg in packages:
-        release, commit = resolve_release(pkg["source"])
-        for target in repo["targets"]:
-            arch = target["arch"]
-            if arch not in pkg["architectures"]:
-                continue
-            pattern = pkg["architectures"][arch]["asset_pattern"]
-            asset = select_asset(release, pkg["source"], pattern)
-            records.append({"channel": "latest", "arch": arch, "name": pkg["name"],
-                "source": pkg["source"],
-                "source_commit": commit, "release_id": release["id"],
-                "release_tag": release["tag_name"], "upstream_prerelease": release["prerelease"],
-                "asset_id": asset["id"], "asset_name": asset["name"],
-                "asset_sha256": asset["digest"].split(":", 1)[1]})
+        for channel in pkg["channels"]:
+            release, commit = releases[pkg["source"], channel]
+            for target in repo["targets"]:
+                arch = target["arch"]
+                if arch not in pkg["architectures"]:
+                    continue
+                pattern = pkg["architectures"][arch]["asset_pattern"]
+                asset = select_asset(release, pkg["source"], pattern)
+                records.append({"channel": channel, "arch": arch, "name": pkg["name"],
+                    "source": pkg["source"],
+                    "source_commit": commit, "release_id": release["id"],
+                    "release_tag": release["tag_name"], "upstream_prerelease": release["prerelease"],
+                    "asset_id": asset["id"], "asset_name": asset["name"],
+                    "asset_sha256": asset["digest"].split(":", 1)[1]})
     require(records, "no packages")
     changed = current is None or identities(records) != identities(current["packages"])
     message = "Upstream changes detected; publication required." if changed else "No upstream changes; publication skipped."

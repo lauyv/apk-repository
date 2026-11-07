@@ -22,5 +22,9 @@
       "arch": "aarch64_generic",
       "abi": "openwrt-25.12"
     }
+  ],
+  "channels": [
+    "stable",
+    "latest"
   ]
 }

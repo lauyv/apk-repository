@@ -11,5 +11,9 @@
       "asset_pattern": "luci-app-cake-tiny-{version}-r{revision}.apk",
       "package_arch": "noarch"
     }
-  }
+  },
+  "channels": [
+    "stable",
+    "latest"
+  ]
 }

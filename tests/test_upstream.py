@@ -3,6 +3,7 @@ import io
 import tempfile
 import unittest
 from pathlib import Path
+from threading import Barrier
 from unittest.mock import patch
 
 from apk_repository.config import ConfigError
@@ -10,6 +11,7 @@ from apk_repository.upstream import (
     api_json,
     download,
     package_version,
+    resolve_channels,
     resolve_release,
     resolve_tag_commit,
     select_asset,
@@ -40,6 +42,35 @@ class UpstreamTests(unittest.TestCase):
         self.assertEqual((release["tag_name"], commit), ("v1.3.0-beta.1", "a" * 40))
         self.assertEqual(api.call_args_list[0].args[0], "repos/owner/tool/releases?per_page=10")
         self.assertEqual(api.call_count, 2)
+
+    def test_stable_uses_official_latest_release_endpoint(self):
+        stable = self.release("v1.2.0", False, "2")
+        with patch("apk_repository.upstream.api_json", side_effect=[
+            stable, {"object": {"type": "commit", "sha": "a" * 40}},
+        ]) as api:
+            release, _ = resolve_release("owner/tool", channel="stable")
+        self.assertEqual(release["tag_name"], "v1.2.0")
+        self.assertEqual(api.call_args_list[0].args[0], "repos/owner/tool/releases/latest")
+
+    def test_stable_rejects_prerelease_flag_and_tag(self):
+        for tag, prerelease in (("v1.3.0", True), ("v1.3.0-beta.1", False)):
+            with self.subTest(tag=tag), self.assertRaises(ConfigError):
+                select_release([self.release(tag, prerelease, "3")], channel="stable")
+
+    def test_channel_queries_are_parallel_and_deduplicated(self):
+        barrier = Barrier(2)
+        calls = []
+
+        def resolve(source, channel):
+            calls.append((source, channel))
+            barrier.wait(timeout=5)
+            return channel
+
+        packages = [{"source": "owner/tool", "channels": ["stable", "latest"]}] * 2
+        result = resolve_channels(packages, resolve)
+        self.assertEqual(set(calls), {("owner/tool", "stable"), ("owner/tool", "latest")})
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(result["owner/tool", "stable"], "stable")
 
     def test_annotated_tag_resolves_to_commit(self):
         with patch("apk_repository.upstream.api_json", side_effect=[
