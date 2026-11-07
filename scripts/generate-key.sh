@@ -6,7 +6,7 @@ DESTINATION=${1:?Usage: bash scripts/generate-key.sh /secure/new-directory}
 [[ ! -e "$DESTINATION" ]] || { echo 'Destination must not already exist.' >&2; exit 1; }
 umask 077
 mkdir -p "$DESTINATION"
-openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:4096 -out "$DESTINATION/apk-repository.key"
+openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out "$DESTINATION/apk-repository.key"
 openssl pkey -in "$DESTINATION/apk-repository.key" -pubout -out "$DESTINATION/apk-repository.pem"
 chmod 0644 "$DESTINATION/apk-repository.pem"
 openssl dgst -sha256 "$DESTINATION/apk-repository.pem"

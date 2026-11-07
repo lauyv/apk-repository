@@ -6,7 +6,9 @@
 
 生产私钥仅放在 `repository-signing` Environment Secret `APK_SIGNING_KEY`。环境限制默认分支并要求审批。临时密钥文件权限为 0600，步骤结束删除，不上传、不写日志。PR 和安装检查不使用生产私钥。
 
-每次重新签名当前包和索引，生成全站 `SHA256SUMS` 与 RSA/SHA-256 签名，验证通过后整体部署。旧 APK 和清单不合并，发布失败不触碰线上站点。不提供历史下载或回滚源；设备先更新索引再安装。
+每次重新签名当前包和索引，生成全站 `SHA256SUMS` 与 ECDSA P-256/SHA-256 签名，验证通过后整体部署。旧 APK 和清单不合并，发布失败不触碰线上站点。不提供历史下载或回滚源；设备先更新索引再安装。
+
+在可信机器上运行 `bash scripts/generate-key.sh /secure/new-directory`，生成 ECDSA P-256 密钥对。将 `apk-repository.key` 的完整 PEM 内容保存到上述 Secret；`apk-repository.pem` 是可分发的公钥。私钥不得提交到仓库。
 
 首次信任公钥前，与维护者提供的可信指纹或可信 Actions 签名任务摘要核对。轮换密钥前先分发新公钥，再更换 Secret 并重新发布。
 

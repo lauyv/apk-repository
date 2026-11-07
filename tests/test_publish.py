@@ -64,8 +64,8 @@ class PublishTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
             key, output = directory / "test.key", directory / "public"
-            subprocess.run(["openssl", "genpkey", "-algorithm", "RSA", "-pkeyopt",
-                            "rsa_keygen_bits:2048", "-out", str(key)], check=True, capture_output=True)
+            subprocess.run(["openssl", "genpkey", "-algorithm", "EC", "-pkeyopt",
+                            "ec_paramgen_curve:P-256", "-out", str(key)], check=True, capture_output=True)
             key.chmod(0o600)
 
             def run(argv, **kwargs):
